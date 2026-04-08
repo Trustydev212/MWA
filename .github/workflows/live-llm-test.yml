@@ -40,6 +40,13 @@ concurrency:
   group: live-llm-test
   cancel-in-progress: false
 
+# GitHub is deprecating Node.js 20 for JavaScript actions on 2 Jun 2026.
+# Opt into Node.js 24 early so we validate action compatibility now
+# instead of discovering breakage on the forced cutover.  See:
+# https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   smoke:
     name: Run live integration tests
