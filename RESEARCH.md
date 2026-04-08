@@ -429,6 +429,87 @@ override.
 
 ---
 
+## Live LLM Interop Findings (futrixapi.com)
+
+Khi chạy `tests/llm/test_live_openai_compat.py` trên GitHub Actions
+runner với endpoint `https://futrixapi.com/v1` (một OpenAI-compatible
+smart-routing gateway), phát hiện 3 interop gap giữa futrixapi và
+OpenAI API reference behaviour. Mỗi cái đều được fix ở code level —
+không giấu bằng `xfail`.
+
+### Finding 1 — `{"top_p": null}` bị reject với HTTP 400
+
+**Symptom:**
+```
+BadRequestError: Error code: 400 - {'error': {'message':
+'top_p: Invalid input: expected number, received null'}}
+```
+
+OpenAI proper chấp nhận `null` cho mọi optional field (coi như
+"dùng default"). futrixapi strict hơn: field nào có phải là số,
+không cho null.
+
+**Root cause:** `OpenAIProvider.chat()` pass `top_p=opts.top_p` bất
+kể `opts.top_p` có phải None không → OpenAI SDK serialize thành
+`"top_p": null` trong request body.
+
+**Fix:** Helper `_build_request_kwargs()` conditionally thêm
+`max_tokens` / `top_p` / `stop` chỉ khi non-None / non-empty. Đây
+cũng là pattern OllamaProvider đã dùng. Commit `3721236`.
+
+**Lesson:** Portable code trên OpenAI-compatible gateways nghĩa là
+**đừng gửi field mà caller không set**. Mỗi gateway có policy
+null-handling riêng, cách duy nhất để đảm bảo hoạt động với tất cả
+là omit thay vì send null.
+
+### Finding 2 — BadRequestError bị translate sai thành Transient
+
+Cùng commit trên: `_translate_error()` trước đây không có branch
+cho `BadRequest` / `"400"` → rơi xuống default `TransientProviderError`.
+Retry 400 là vô nghĩa (payload sai không tự fix), chỉ đốt budget và
+rate-limit. Fix: 400 → `PermanentProviderError`.
+
+### Finding 3 — `response_format=json_schema` bị ignore silent
+
+**Symptom:** futrixapi chấp nhận `response_format={"type":
+"json_schema", "strict": true}` nhưng **không enforce**. Model trả
+về JSON nhưng với field hoàn toàn khác schema:
+
+```json
+// Schema asked for: {winner, confidence, reason}
+// Gateway returned: {arbiter, state, confidence_gap}
+```
+
+Đây là gap phổ biến của các OpenAI-compatible gateway forward flag
+xuống underlying model nhưng underlying model (hoặc routing logic)
+không support constrained decoding. OpenAI proper + Anthropic (qua
+tool_use) + một số LiteLLM deployment thì support đầy đủ; nhiều
+gateway khác (OpenRouter free tier, futrixapi auto-routing) thì
+không.
+
+**Fix:** Thêm `structured_strategy` param vào `OpenAIProvider` với 3
+mode:
+- `"json_schema"` — strict mode, best cho OpenAI proper
+- `"json_object"` — portable fallback. Inject schema vào system
+  message, set `response_format={"type": "json_object"}`. Giống
+  approach của `OllamaProvider.structured()`.
+- `"auto"` (default) — thử json_schema trước, nếu
+  `ResponseSchemaError` thì latch sang json_object cho instance
+  lifetime. Một round-trip extra trên lần đầu fail, không có sau đó.
+
+**Trade-off:** `json_object` mode không có guarantee từ server, chỉ
+force "phải là JSON". Reliance vào prompt engineering + model
+capability. Trong practice GPT-4o, Claude, Llama 3.3 70B đều rất
+reliable khi được hint schema tường minh. Weak gateway model (ví dụ
+một router pick model nhỏ) vẫn có thể fail — lúc đó caller nhận
+`ResponseSchemaError` với preview content để debug.
+
+**Lesson:** "OpenAI-compatible" là spectrum, không phải binary.
+Mỗi provider cần probe capability thay vì assume. Strategy param
+cho user explicit control khi biết gateway behaviour.
+
+---
+
 ## Open Research Questions
 
 Những thứ chưa biết câu trả lời, cần research khi build các milestone sau:

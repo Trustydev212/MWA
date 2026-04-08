@@ -8,16 +8,39 @@ Install with::
 
     uv pip install mwa[openai]
 
-Structured output uses OpenAI's ``response_format`` with ``json_schema``
-mode — the strictest option available, which guarantees the response
-either matches the schema or the API call errors out.
+Structured output
+-----------------
+OpenAI's own API supports ``response_format={"type": "json_schema",
+"strict": true}`` which server-side constrains decoding to a schema.
+That's the strongest guarantee available, and it's the default path.
+
+Third-party OpenAI-compatible gateways vary wildly:
+
+- **Strict support** (OpenAI proper, some LiteLLM deployments):
+  ``json_schema`` mode is respected and decoding is constrained.
+- **Weak support** (futrixapi, OpenRouter free tier, …): the flag is
+  accepted but silently ignored — the model produces JSON, but not
+  matching the schema.  :class:`ResponseSchemaError` follows.
+- **No support** at all: the API errors out on the flag.
+
+:attr:`OpenAIProvider` handles all three via the ``structured_strategy``
+constructor parameter:
+
+- ``"json_schema"`` — always use json_schema strict.  Best for OpenAI.
+- ``"json_object"`` — always use ``response_format={"type": "json_object"}``
+  plus a schema hint injected as a system message (same approach
+  :class:`~mwa.llm.providers.OllamaProvider` uses).  More portable.
+- ``"auto"`` (default) — try json_schema first; on
+  :class:`ResponseSchemaError` fall back to json_object and remember
+  that decision for the rest of the instance's lifetime.  One extra
+  round-trip on the first failure, zero on every call after.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator, Sequence
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -39,6 +62,8 @@ if TYPE_CHECKING:
 
 T_Schema = TypeVar("T_Schema", bound=BaseModel)
 
+StructuredStrategy = Literal["json_schema", "json_object", "auto"]
+
 
 class OpenAIProvider:
     """Adapter for OpenAI chat models (GPT-4/4o/5, o-series, ...)."""
@@ -50,8 +75,15 @@ class OpenAIProvider:
         api_key: str | None = None,
         client: AsyncOpenAI | None = None,
         base_url: str | None = None,
+        structured_strategy: StructuredStrategy = "auto",
     ) -> None:
         self._model = model
+        self._structured_strategy: StructuredStrategy = structured_strategy
+        # When strategy is "auto" we start by trying json_schema.  If it
+        # fails once, we latch to json_object and never retry the strict
+        # path on this instance — third-party gateways don't fix
+        # themselves mid-session.
+        self._auto_fallback_latched = False
 
         if client is not None:
             self._client = client
@@ -123,6 +155,30 @@ class OpenAIProvider:
         *,
         options: ChatOptions | None = None,
     ) -> T_Schema:
+        strategy = self._structured_strategy
+
+        if strategy == "json_schema":
+            return await self._structured_via_json_schema(messages, schema, options)
+        if strategy == "json_object":
+            return await self._structured_via_json_object(messages, schema, options)
+
+        # "auto" — try json_schema first unless we already learned it's broken.
+        if self._auto_fallback_latched:
+            return await self._structured_via_json_object(messages, schema, options)
+        try:
+            return await self._structured_via_json_schema(messages, schema, options)
+        except ResponseSchemaError:
+            # Gateway accepted json_schema but didn't honour it.  Latch the
+            # fallback decision and retry this call with the portable path.
+            self._auto_fallback_latched = True
+            return await self._structured_via_json_object(messages, schema, options)
+
+    async def _structured_via_json_schema(
+        self,
+        messages: Sequence[Message],
+        schema: type[T_Schema],
+        options: ChatOptions | None,
+    ) -> T_Schema:
         api_messages = self._translate_messages(messages)
         opts = options or ChatOptions()
 
@@ -149,7 +205,53 @@ class OpenAIProvider:
             return schema.model_validate(json.loads(content))
         except (json.JSONDecodeError, ValidationError) as exc:
             raise ResponseSchemaError(
-                f"OpenAI returned content that did not validate against {schema.__name__}: {exc}"
+                f"OpenAI json_schema mode returned content that did not "
+                f"validate against {schema.__name__}: {exc}"
+            ) from exc
+
+    async def _structured_via_json_object(
+        self,
+        messages: Sequence[Message],
+        schema: type[T_Schema],
+        options: ChatOptions | None,
+    ) -> T_Schema:
+        """Portable structured output: prompt injection + json_object mode.
+
+        Works on gateways that ignore json_schema strict but respect
+        response_format=json_object (forces the model to emit a single JSON
+        object).  We inject the schema as a system message so the model
+        knows what shape to produce.
+        """
+        schema_hint = (
+            "Respond with a single JSON object that matches this JSON schema. "
+            "Use exactly the field names listed. Do not include explanations, "
+            "markdown fences, or extra fields.\n\n"
+            f"{json.dumps(schema.model_json_schema(), indent=2)}"
+        )
+        augmented: list[Message] = [
+            *messages,
+            Message(role=MessageRole.SYSTEM, content=schema_hint),
+        ]
+        api_messages = self._translate_messages(augmented)
+        opts = options or ChatOptions()
+
+        try:
+            raw = await self._client.chat.completions.create(
+                **self._build_request_kwargs(
+                    api_messages, opts, response_format={"type": "json_object"}
+                )
+            )
+        except Exception as exc:  # pragma: no cover
+            raise self._translate_error(exc) from exc
+
+        content = self._extract_text(raw)
+        try:
+            return schema.model_validate(json.loads(content))
+        except (json.JSONDecodeError, ValidationError) as exc:
+            raise ResponseSchemaError(
+                f"OpenAI json_object mode returned content that did not "
+                f"validate against {schema.__name__}: {exc}. "
+                f"Raw content: {content[:200]}..."
             ) from exc
 
     def count_tokens(self, text: str) -> int:
