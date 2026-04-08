@@ -39,6 +39,7 @@ constructor parameter:
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator, Sequence
 from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
@@ -63,6 +64,80 @@ if TYPE_CHECKING:
 T_Schema = TypeVar("T_Schema", bound=BaseModel)
 
 StructuredStrategy = Literal["json_schema", "json_object", "auto"]
+
+
+# ---------------------------------------------------------------------------
+# Helpers used by the structured() paths
+# ---------------------------------------------------------------------------
+
+# Matches leading ```json / ``` fence including optional language tag.
+_LEADING_FENCE = re.compile(r"^\s*```[a-zA-Z0-9_-]*\s*\n?")
+_TRAILING_FENCE = re.compile(r"\n?\s*```\s*$")
+
+
+def _clean_json_response(content: str) -> str:
+    """Best-effort strip of LLM decoration around a JSON object.
+
+    LLMs — especially ones routed through smart-routing gateways —
+    frequently ignore "respond with plain JSON" instructions and emit:
+
+        ```json
+        {"winner": "alice"}
+        ```
+
+    or prefix the JSON with prose ("Here is the decision: {...}").
+    This helper removes markdown code fences and, as a last resort,
+    extracts the first balanced ``{...}`` substring so the caller's
+    ``json.loads()`` has a fighting chance.
+
+    We intentionally do NOT try to repair malformed JSON — silently
+    fixing broken output would hide real issues.  The goal is only to
+    undo decorative wrapping.
+    """
+    content = content.strip()
+    content = _LEADING_FENCE.sub("", content)
+    content = _TRAILING_FENCE.sub("", content)
+    content = content.strip()
+
+    # If the content still doesn't start with `{`, try to find the first
+    # top-level JSON object.  This handles "Here's the JSON: {...}" style
+    # preambles.  We use rfind for the closing brace so a JSON object
+    # containing nested objects still works.
+    if content and not content.startswith("{"):
+        start = content.find("{")
+        end = content.rfind("}")
+        if start != -1 and end > start:
+            content = content[start : end + 1]
+    return content
+
+
+def _build_forceful_schema_hint(schema: type[BaseModel]) -> str:
+    """Build a system prompt that aggressively constrains output shape.
+
+    Routed / weak gateway models frequently "improvise" field names
+    when asked to produce JSON, especially on domain-sounding user
+    messages ("resolve this agent conflict"). We counter that with:
+
+    1. Explicit list of required top-level field names (most
+       influential signal — the model sees exact strings).
+    2. "MUST" / "EXACTLY" / "DO NOT" phrasing.
+    3. Delimiter hints ("start with '{'", "end with '}'").
+    4. Full JSON schema as fallback documentation.
+    """
+    field_names = list(schema.model_fields.keys())
+    schema_json = json.dumps(schema.model_json_schema(), indent=2)
+    return (
+        f"CRITICAL OUTPUT CONSTRAINT.  You MUST respond with a single JSON "
+        f"object containing EXACTLY these top-level fields and no others:\n"
+        f"    {field_names}\n\n"
+        f"Rules (all mandatory):\n"
+        f"  - Start your response with '{{' and end with '}}'.\n"
+        f"  - Do NOT wrap the JSON in markdown code fences (no ``` blocks).\n"
+        f"  - Do NOT include any text before or after the JSON object.\n"
+        f"  - Do NOT rename, add, or omit fields.\n"
+        f"  - All listed fields are required.\n\n"
+        f"Full JSON schema for type reference:\n{schema_json}"
+    )
 
 
 class OpenAIProvider:
@@ -200,7 +275,7 @@ class OpenAIProvider:
         except Exception as exc:  # pragma: no cover
             raise self._translate_error(exc) from exc
 
-        content = self._extract_text(raw)
+        content = _clean_json_response(self._extract_text(raw))
         try:
             return schema.model_validate(json.loads(content))
         except (json.JSONDecodeError, ValidationError) as exc:
@@ -219,18 +294,18 @@ class OpenAIProvider:
 
         Works on gateways that ignore json_schema strict but respect
         response_format=json_object (forces the model to emit a single JSON
-        object).  We inject the schema as a system message so the model
-        knows what shape to produce.
+        object).  We inject the schema as a **leading** system message
+        because some gateways only honour system messages at the start
+        of the conversation, and because system guidance at the top
+        dominates late-stage user context.
         """
-        schema_hint = (
-            "Respond with a single JSON object that matches this JSON schema. "
-            "Use exactly the field names listed. Do not include explanations, "
-            "markdown fences, or extra fields.\n\n"
-            f"{json.dumps(schema.model_json_schema(), indent=2)}"
-        )
+        schema_hint = _build_forceful_schema_hint(schema)
+        # Prepend: leading system messages are most influential, and some
+        # OpenAI-compatible gateways ignore system messages that appear
+        # after user messages.
         augmented: list[Message] = [
-            *messages,
             Message(role=MessageRole.SYSTEM, content=schema_hint),
+            *messages,
         ]
         api_messages = self._translate_messages(augmented)
         opts = options or ChatOptions()
@@ -244,14 +319,14 @@ class OpenAIProvider:
         except Exception as exc:  # pragma: no cover
             raise self._translate_error(exc) from exc
 
-        content = self._extract_text(raw)
+        content = _clean_json_response(self._extract_text(raw))
         try:
             return schema.model_validate(json.loads(content))
         except (json.JSONDecodeError, ValidationError) as exc:
             raise ResponseSchemaError(
                 f"OpenAI json_object mode returned content that did not "
                 f"validate against {schema.__name__}: {exc}. "
-                f"Raw content: {content[:200]}..."
+                f"Raw content: {content[:300]}..."
             ) from exc
 
     def count_tokens(self, text: str) -> int:

@@ -324,11 +324,57 @@ async def test_structured_json_object_strategy_injects_schema_hint(
 
     call = fake_client.chat.completions.create_calls[0]
     assert call["response_format"] == {"type": "json_object"}
-    # Schema hint must be appended as the last system message
-    last_msg = call["messages"][-1]
-    assert last_msg["role"] == "system"
-    assert "JSON schema" in last_msg["content"]
-    assert "_Decision" in last_msg["content"] or "winner" in last_msg["content"]
+    # Schema hint must be prepended as the FIRST message — trailing system
+    # messages get ignored by some gateways, and leading system guidance
+    # is the most influential signal.
+    first_msg = call["messages"][0]
+    assert first_msg["role"] == "system"
+    assert "CRITICAL OUTPUT CONSTRAINT" in first_msg["content"]
+    # The field name list must appear verbatim so the model sees exact strings
+    assert "'winner'" in first_msg["content"]
+    assert "'confidence'" in first_msg["content"]
+
+
+async def test_structured_json_object_strips_markdown_fences(
+    fake_client: _FakeOpenAIClient,
+) -> None:
+    """Weak gateway models love to wrap JSON in ```json ... ``` blocks
+    even when told not to.  We must strip the decoration before parsing."""
+    portable = OpenAIProvider(
+        model="gpt-test",
+        client=fake_client,  # type: ignore[arg-type]
+        structured_strategy="json_object",
+    )
+    # Simulate a model that returned JSON wrapped in markdown fences
+    wrapped = '```json\n{"winner": "carol", "confidence": 0.6}\n```'
+    fake_client.chat.completions.will_return(
+        _FakeResponse(choices=[_FakeChoice(message=_FakeMessage(content=wrapped))])
+    )
+    result = await portable.structured(
+        [Message(role=MessageRole.USER, content="decide")], _Decision
+    )
+    assert result.winner == "carol"
+    assert result.confidence == 0.6
+
+
+async def test_structured_json_object_strips_preamble(
+    fake_client: _FakeOpenAIClient,
+) -> None:
+    """Some models prefix the JSON with prose like 'Here is the decision:'.
+    We should extract the first {...} block rather than erroring out."""
+    portable = OpenAIProvider(
+        model="gpt-test",
+        client=fake_client,  # type: ignore[arg-type]
+        structured_strategy="json_object",
+    )
+    with_preamble = 'Sure! Here is the decision:\n{"winner": "dave", "confidence": 0.5}\nHope this helps!'
+    fake_client.chat.completions.will_return(
+        _FakeResponse(choices=[_FakeChoice(message=_FakeMessage(content=with_preamble))])
+    )
+    result = await portable.structured(
+        [Message(role=MessageRole.USER, content="decide")], _Decision
+    )
+    assert result.winner == "dave"
 
 
 # ---------------------------------------------------------------------------
