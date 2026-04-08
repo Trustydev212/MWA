@@ -40,6 +40,7 @@ import pytest
 
 from mwa.arbiter import ArbiterDecision, Resolution, ResolutionDecision, SemanticArbiter
 from mwa.harness import HarnessMap
+from mwa.llm import LLMProvider, LLMRouter, RetryPolicy
 from mwa.llm.providers import OpenAIProvider
 from mwa.types import Conflict, Episode, WriteProposal
 
@@ -91,7 +92,12 @@ def harness() -> HarnessMap:
 
 
 @pytest.fixture
-def provider() -> OpenAIProvider:
+def raw_provider() -> OpenAIProvider:
+    """Unwrapped adapter — what the provider test suite uses directly.
+
+    Exposed separately so individual tests can prove they go through
+    the bare adapter rather than through the retry wrapper below.
+    """
     cfg = _live_config()
     assert cfg is not None  # guarded by skipif above
     return OpenAIProvider(
@@ -105,7 +111,41 @@ def provider() -> OpenAIProvider:
 
 
 @pytest.fixture
-def arbiter(provider: OpenAIProvider, harness: HarnessMap) -> SemanticArbiter:
+def provider(raw_provider: OpenAIProvider) -> LLMProvider:
+    """Retry-wrapped provider — the realistic production shape.
+
+    Why wrap in :class:`LLMRouter`?  Routed OpenAI-compatible gateways
+    (futrixapi, OpenRouter, LiteLLM, …) sit behind Cloudflare and
+    regularly emit transient ``504 Gateway Timeout`` on slow model
+    routes.  The ``openai`` SDK already retries 2x internally on 5xx,
+    but that's short fixed backoff; our :class:`RetryPolicy` adds
+    exponential backoff with decorrelated jitter on top.
+
+    The previous live run failed exactly this way:
+
+        InternalServerError: <!DOCTYPE html>
+        <title>futrixapi.com | 504: Gateway time-out</title>
+
+    Wrapping the real adapter in :class:`LLMRouter` with a retry
+    policy is the **documented production pattern** (see README
+    "Failure Modes & Mitigations" section).  These live tests mirror
+    that pattern so they flake on genuine breakage only, not on the
+    gateway sneezing once during an 8-minute run.
+    """
+    return LLMRouter(
+        primary=raw_provider,
+        retry=RetryPolicy(
+            max_attempts=3,
+            base_delay=2.0,
+            max_delay=30.0,
+            # Defaults retry on RateLimitError + TransientProviderError
+            # which is exactly what Cloudflare 504 maps to.
+        ),
+    )
+
+
+@pytest.fixture
+def arbiter(provider: LLMProvider, harness: HarnessMap) -> SemanticArbiter:
     return SemanticArbiter(provider, harness, auto_resolve_threshold=0.85)
 
 
@@ -180,7 +220,7 @@ async def test_live_semantic_arbiter_returns_valid_decision(
 
 async def test_live_semantic_arbiter_respects_low_confidence_escalation(
     arbiter: SemanticArbiter,
-    provider: OpenAIProvider,
+    provider: LLMProvider,
     harness: HarnessMap,
 ) -> None:
     """Build an arbiter with an unrealistically high threshold.
@@ -210,14 +250,15 @@ async def test_live_semantic_arbiter_respects_low_confidence_escalation(
 
 
 async def test_live_arbiter_decision_schema_round_trip(
-    provider: OpenAIProvider,
+    provider: LLMProvider,
 ) -> None:
     """Direct structured() call, bypassing SemanticArbiter layer.
 
-    This pins down whether ``OpenAIProvider.structured()`` can
+    This pins down whether :meth:`OpenAIProvider.structured` can
     successfully decode ``ArbiterDecision`` from the configured
-    gateway.  If this fails, the issue is definitely at the provider
-    layer, not the arbiter."""
+    gateway.  If this fails, the issue is at the provider layer, not
+    the arbiter.  Uses the retry-wrapped ``provider`` fixture so we
+    survive transient 504s the same way production would."""
     from mwa.llm.base import ChatOptions, Message, MessageRole
 
     messages = [
