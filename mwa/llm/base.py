@@ -172,7 +172,11 @@ class LLMProvider(Protocol):
         """Single-shot chat call.  Returns the complete response."""
         ...
 
-    async def stream(
+    # NOTE: ``def`` not ``async def`` — stream() returns an async generator,
+    # not a coroutine that returns one.  Using ``async def`` here makes mypy
+    # infer ``Coroutine[..., AsyncIterator[ChatChunk]]``, which implementations
+    # (that use ``yield`` in the body → async generator) can't satisfy.
+    def stream(
         self,
         messages: Sequence[Message],
         *,
