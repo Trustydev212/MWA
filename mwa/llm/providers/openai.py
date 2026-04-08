@@ -8,16 +8,40 @@ Install with::
 
     uv pip install mwa[openai]
 
-Structured output uses OpenAI's ``response_format`` with ``json_schema``
-mode — the strictest option available, which guarantees the response
-either matches the schema or the API call errors out.
+Structured output
+-----------------
+OpenAI's own API supports ``response_format={"type": "json_schema",
+"strict": true}`` which server-side constrains decoding to a schema.
+That's the strongest guarantee available, and it's the default path.
+
+Third-party OpenAI-compatible gateways vary wildly:
+
+- **Strict support** (OpenAI proper, some LiteLLM deployments):
+  ``json_schema`` mode is respected and decoding is constrained.
+- **Weak support** (futrixapi, OpenRouter free tier, …): the flag is
+  accepted but silently ignored — the model produces JSON, but not
+  matching the schema.  :class:`ResponseSchemaError` follows.
+- **No support** at all: the API errors out on the flag.
+
+:attr:`OpenAIProvider` handles all three via the ``structured_strategy``
+constructor parameter:
+
+- ``"json_schema"`` — always use json_schema strict.  Best for OpenAI.
+- ``"json_object"`` — always use ``response_format={"type": "json_object"}``
+  plus a schema hint injected as a system message (same approach
+  :class:`~mwa.llm.providers.OllamaProvider` uses).  More portable.
+- ``"auto"`` (default) — try json_schema first; on
+  :class:`ResponseSchemaError` fall back to json_object and remember
+  that decision for the rest of the instance's lifetime.  One extra
+  round-trip on the first failure, zero on every call after.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator, Sequence
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -39,6 +63,82 @@ if TYPE_CHECKING:
 
 T_Schema = TypeVar("T_Schema", bound=BaseModel)
 
+StructuredStrategy = Literal["json_schema", "json_object", "auto"]
+
+
+# ---------------------------------------------------------------------------
+# Helpers used by the structured() paths
+# ---------------------------------------------------------------------------
+
+# Matches leading ```json / ``` fence including optional language tag.
+_LEADING_FENCE = re.compile(r"^\s*```[a-zA-Z0-9_-]*\s*\n?")
+_TRAILING_FENCE = re.compile(r"\n?\s*```\s*$")
+
+
+def _clean_json_response(content: str) -> str:
+    """Best-effort strip of LLM decoration around a JSON object.
+
+    LLMs — especially ones routed through smart-routing gateways —
+    frequently ignore "respond with plain JSON" instructions and emit:
+
+        ```json
+        {"winner": "alice"}
+        ```
+
+    or prefix the JSON with prose ("Here is the decision: {...}").
+    This helper removes markdown code fences and, as a last resort,
+    extracts the first balanced ``{...}`` substring so the caller's
+    ``json.loads()`` has a fighting chance.
+
+    We intentionally do NOT try to repair malformed JSON — silently
+    fixing broken output would hide real issues.  The goal is only to
+    undo decorative wrapping.
+    """
+    content = content.strip()
+    content = _LEADING_FENCE.sub("", content)
+    content = _TRAILING_FENCE.sub("", content)
+    content = content.strip()
+
+    # If the content still doesn't start with `{`, try to find the first
+    # top-level JSON object.  This handles "Here's the JSON: {...}" style
+    # preambles.  We use rfind for the closing brace so a JSON object
+    # containing nested objects still works.
+    if content and not content.startswith("{"):
+        start = content.find("{")
+        end = content.rfind("}")
+        if start != -1 and end > start:
+            content = content[start : end + 1]
+    return content
+
+
+def _build_forceful_schema_hint(schema: type[BaseModel]) -> str:
+    """Build a system prompt that aggressively constrains output shape.
+
+    Routed / weak gateway models frequently "improvise" field names
+    when asked to produce JSON, especially on domain-sounding user
+    messages ("resolve this agent conflict"). We counter that with:
+
+    1. Explicit list of required top-level field names (most
+       influential signal — the model sees exact strings).
+    2. "MUST" / "EXACTLY" / "DO NOT" phrasing.
+    3. Delimiter hints ("start with '{'", "end with '}'").
+    4. Full JSON schema as fallback documentation.
+    """
+    field_names = list(schema.model_fields.keys())
+    schema_json = json.dumps(schema.model_json_schema(), indent=2)
+    return (
+        f"CRITICAL OUTPUT CONSTRAINT.  You MUST respond with a single JSON "
+        f"object containing EXACTLY these top-level fields and no others:\n"
+        f"    {field_names}\n\n"
+        f"Rules (all mandatory):\n"
+        f"  - Start your response with '{{' and end with '}}'.\n"
+        f"  - Do NOT wrap the JSON in markdown code fences (no ``` blocks).\n"
+        f"  - Do NOT include any text before or after the JSON object.\n"
+        f"  - Do NOT rename, add, or omit fields.\n"
+        f"  - All listed fields are required.\n\n"
+        f"Full JSON schema for type reference:\n{schema_json}"
+    )
+
 
 class OpenAIProvider:
     """Adapter for OpenAI chat models (GPT-4/4o/5, o-series, ...)."""
@@ -50,8 +150,15 @@ class OpenAIProvider:
         api_key: str | None = None,
         client: AsyncOpenAI | None = None,
         base_url: str | None = None,
+        structured_strategy: StructuredStrategy = "auto",
     ) -> None:
         self._model = model
+        self._structured_strategy: StructuredStrategy = structured_strategy
+        # When strategy is "auto" we start by trying json_schema.  If it
+        # fails once, we latch to json_object and never retry the strict
+        # path on this instance — third-party gateways don't fix
+        # themselves mid-session.
+        self._auto_fallback_latched = False
 
         if client is not None:
             self._client = client
@@ -83,17 +190,8 @@ class OpenAIProvider:
         opts = options or ChatOptions()
 
         try:
-            # The openai SDK types messages as strict TypedDicts; MWA's
-            # neutral Message format intentionally stays simpler, so we
-            # silence the messages arg-type check.  Wire format is still
-            # exactly what the SDK expects.
             raw = await self._client.chat.completions.create(
-                model=self._model,
-                messages=api_messages,  # type: ignore[arg-type]
-                temperature=opts.temperature,
-                max_tokens=opts.max_tokens,
-                top_p=opts.top_p,
-                stop=list(opts.stop) or None,
+                **self._build_request_kwargs(api_messages, opts)
             )
         except Exception as exc:  # pragma: no cover
             raise self._translate_error(exc) from exc
@@ -110,18 +208,10 @@ class OpenAIProvider:
         opts = options or ChatOptions()
 
         try:
-            # stream=True picks the AsyncStream overload; messages silenced
-            # for the same reason as chat().
             stream = await self._client.chat.completions.create(
-                model=self._model,
-                messages=api_messages,  # type: ignore[arg-type]
-                temperature=opts.temperature,
-                max_tokens=opts.max_tokens,
-                top_p=opts.top_p,
-                stop=list(opts.stop) or None,
-                stream=True,
+                **self._build_request_kwargs(api_messages, opts, stream=True)
             )
-            async for event in stream:  # type: ignore[union-attr]
+            async for event in stream:
                 choice = event.choices[0] if event.choices else None
                 if choice is None:
                     continue
@@ -140,6 +230,30 @@ class OpenAIProvider:
         *,
         options: ChatOptions | None = None,
     ) -> T_Schema:
+        strategy = self._structured_strategy
+
+        if strategy == "json_schema":
+            return await self._structured_via_json_schema(messages, schema, options)
+        if strategy == "json_object":
+            return await self._structured_via_json_object(messages, schema, options)
+
+        # "auto" — try json_schema first unless we already learned it's broken.
+        if self._auto_fallback_latched:
+            return await self._structured_via_json_object(messages, schema, options)
+        try:
+            return await self._structured_via_json_schema(messages, schema, options)
+        except ResponseSchemaError:
+            # Gateway accepted json_schema but didn't honour it.  Latch the
+            # fallback decision and retry this call with the portable path.
+            self._auto_fallback_latched = True
+            return await self._structured_via_json_object(messages, schema, options)
+
+    async def _structured_via_json_schema(
+        self,
+        messages: Sequence[Message],
+        schema: type[T_Schema],
+        options: ChatOptions | None,
+    ) -> T_Schema:
         api_messages = self._translate_messages(messages)
         opts = options or ChatOptions()
 
@@ -153,26 +267,66 @@ class OpenAIProvider:
         }
 
         try:
-            # response_format is a hand-built dict rather than the SDK's
-            # strict TypedDict; messages silenced for the same reason as
-            # chat().  Together this confuses overload resolution so we
-            # silence the whole call-overload selection here.
-            raw = await self._client.chat.completions.create(  # type: ignore[call-overload]
-                model=self._model,
-                messages=api_messages,
-                temperature=opts.temperature,
-                max_tokens=opts.max_tokens,
-                response_format=response_format,
+            raw = await self._client.chat.completions.create(
+                **self._build_request_kwargs(
+                    api_messages, opts, response_format=response_format
+                )
             )
         except Exception as exc:  # pragma: no cover
             raise self._translate_error(exc) from exc
 
-        content = self._extract_text(raw)
+        content = _clean_json_response(self._extract_text(raw))
         try:
             return schema.model_validate(json.loads(content))
         except (json.JSONDecodeError, ValidationError) as exc:
             raise ResponseSchemaError(
-                f"OpenAI returned content that did not validate against {schema.__name__}: {exc}"
+                f"OpenAI json_schema mode returned content that did not "
+                f"validate against {schema.__name__}: {exc}"
+            ) from exc
+
+    async def _structured_via_json_object(
+        self,
+        messages: Sequence[Message],
+        schema: type[T_Schema],
+        options: ChatOptions | None,
+    ) -> T_Schema:
+        """Portable structured output: prompt injection + json_object mode.
+
+        Works on gateways that ignore json_schema strict but respect
+        response_format=json_object (forces the model to emit a single JSON
+        object).  We inject the schema as a **leading** system message
+        because some gateways only honour system messages at the start
+        of the conversation, and because system guidance at the top
+        dominates late-stage user context.
+        """
+        schema_hint = _build_forceful_schema_hint(schema)
+        # Prepend: leading system messages are most influential, and some
+        # OpenAI-compatible gateways ignore system messages that appear
+        # after user messages.
+        augmented: list[Message] = [
+            Message(role=MessageRole.SYSTEM, content=schema_hint),
+            *messages,
+        ]
+        api_messages = self._translate_messages(augmented)
+        opts = options or ChatOptions()
+
+        try:
+            raw = await self._client.chat.completions.create(
+                **self._build_request_kwargs(
+                    api_messages, opts, response_format={"type": "json_object"}
+                )
+            )
+        except Exception as exc:  # pragma: no cover
+            raise self._translate_error(exc) from exc
+
+        content = _clean_json_response(self._extract_text(raw))
+        try:
+            return schema.model_validate(json.loads(content))
+        except (json.JSONDecodeError, ValidationError) as exc:
+            raise ResponseSchemaError(
+                f"OpenAI json_object mode returned content that did not "
+                f"validate against {schema.__name__}: {exc}. "
+                f"Raw content: {content[:300]}..."
             ) from exc
 
     def count_tokens(self, text: str) -> int:
@@ -185,6 +339,35 @@ class OpenAIProvider:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    def _build_request_kwargs(
+        self,
+        api_messages: list[dict[str, Any]],
+        opts: ChatOptions,
+        **extra: Any,
+    ) -> dict[str, Any]:
+        """Build the kwargs dict passed to ``chat.completions.create``.
+
+        Optional fields are only added when the caller actually set them.
+        OpenAI's own API is lenient and accepts ``null`` for every optional
+        field, but third-party OpenAI-compatible gateways (futrixapi,
+        LiteLLM, OpenRouter, ...) vary: some reject ``{"top_p": null}``
+        with a 400.  The only portable thing to do is omit fields we don't
+        care about instead of sending explicit nulls.
+        """
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": api_messages,
+            "temperature": opts.temperature,
+        }
+        if opts.max_tokens is not None:
+            kwargs["max_tokens"] = opts.max_tokens
+        if opts.top_p is not None:
+            kwargs["top_p"] = opts.top_p
+        if opts.stop:
+            kwargs["stop"] = list(opts.stop)
+        kwargs.update(extra)
+        return kwargs
 
     @staticmethod
     def _translate_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
@@ -234,6 +417,14 @@ class OpenAIProvider:
             return RateLimitError(msg)
         if "APIConnection" in name or "Timeout" in name or "InternalServer" in name:
             return TransientProviderError(msg)
-        if "Authentication" in name or "PermissionDenied" in name or "NotFound" in name:
+        # BadRequest / 400 = malformed payload, retrying is pointless.
+        # Authentication / NotFound / PermissionDenied = same story.
+        if (
+            "BadRequest" in name
+            or "400" in msg
+            or "Authentication" in name
+            or "PermissionDenied" in name
+            or "NotFound" in name
+        ):
             return PermanentProviderError(msg)
         return TransientProviderError(msg)
