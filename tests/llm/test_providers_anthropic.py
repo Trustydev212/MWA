@@ -2,7 +2,7 @@
 
 We never import the real ``anthropic`` package here.  Instead we pass a
 hand-rolled fake client into the provider constructor.  That lets us
-test the translation logic (SOMA Message -> Anthropic payload -> SOMA
+test the translation logic (MWA Message -> Anthropic payload -> MWA
 ChatResponse) without requiring the SDK to be installed at all.
 """
 
@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from soma.llm import (
+from mwa.llm import (
     ChatOptions,
     Message,
     MessageRole,
@@ -22,7 +22,7 @@ from soma.llm import (
     ResponseSchemaError,
     TransientProviderError,
 )
-from soma.llm.providers import AnthropicProvider
+from mwa.llm.providers import AnthropicProvider
 
 # ---------------------------------------------------------------------------
 # Fake anthropic client

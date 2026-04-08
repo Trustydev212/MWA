@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from soma.errors import HarnessMapError
-from soma.harness import HarnessMap
-from soma.harness.schema import HarnessSchema, ScoringWeights
+from mwa.errors import HarnessMapError
+from mwa.harness import HarnessMap
+from mwa.harness.schema import HarnessSchema, ScoringWeights
 
 
 def _minimal_dict() -> dict:

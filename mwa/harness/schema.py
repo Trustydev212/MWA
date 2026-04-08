@@ -12,14 +12,14 @@ Why Pydantic instead of stdlib ``dataclass`` + manual validation?
    else in the codebase can assume a fully-validated ``HarnessSchema``.
 
 These models are pure data — no traversal logic.  That lives in
-``soma.harness.map`` so the schema layer can be tested in isolation.
+``mwa.harness.map`` so the schema layer can be tested in isolation.
 """
 
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from soma.types import Impact
+from mwa.types import Impact
 
 # ---------------------------------------------------------------------------
 # Conflict resolution / scoring config

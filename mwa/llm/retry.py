@@ -17,7 +17,7 @@ import random
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
-from soma.llm.base import RateLimitError, TransientProviderError
+from mwa.llm.base import RateLimitError, TransientProviderError
 
 T = TypeVar("T")
 

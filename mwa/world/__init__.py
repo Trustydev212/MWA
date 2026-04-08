@@ -17,8 +17,8 @@ Design philosophy
   storage layer free of LLM dependencies.
 """
 
-from soma.world.base import WorldModelProtocol
-from soma.world.memory import InMemoryWorldModel
+from mwa.world.base import WorldModelProtocol
+from mwa.world.memory import InMemoryWorldModel
 
 __all__ = [
     "InMemoryWorldModel",

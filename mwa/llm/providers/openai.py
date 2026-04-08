@@ -1,12 +1,12 @@
 """OpenAI adapter.
 
-Implements :class:`~soma.llm.base.LLMProvider` on top of the official
+Implements :class:`~mwa.llm.base.LLMProvider` on top of the official
 ``openai`` async SDK.  Lazy-imports the SDK so the module stays
 importable without ``openai`` installed.
 
 Install with::
 
-    uv pip install soma[openai]
+    uv pip install mwa[openai]
 
 Structured output uses OpenAI's ``response_format`` with ``json_schema``
 mode — the strictest option available, which guarantees the response
@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from soma.llm.base import (
+from mwa.llm.base import (
     ChatChunk,
     ChatOptions,
     ChatResponse,
@@ -61,7 +61,7 @@ class OpenAIProvider:
             except ImportError as exc:
                 raise PermanentProviderError(
                     "OpenAIProvider requires the `openai` package. "
-                    "Install with: `uv pip install soma[openai]`"
+                    "Install with: `uv pip install mwa[openai]`"
                 ) from exc
             self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
@@ -83,7 +83,7 @@ class OpenAIProvider:
         opts = options or ChatOptions()
 
         try:
-            # The openai SDK types messages as strict TypedDicts; SOMA's
+            # The openai SDK types messages as strict TypedDicts; MWA's
             # neutral Message format intentionally stays simpler, so we
             # silence the messages arg-type check.  Wire format is still
             # exactly what the SDK expects.
@@ -188,13 +188,13 @@ class OpenAIProvider:
 
     @staticmethod
     def _translate_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
-        """SOMA → OpenAI chat message format."""
+        """MWA → OpenAI chat message format."""
         out: list[dict[str, Any]] = []
         for msg in messages:
             role = msg.role.value
             if msg.role is MessageRole.TOOL:
                 # OpenAI tool messages need a tool_call_id; we don't
-                # track one at the SOMA level yet so emit as a function
+                # track one at the MWA level yet so emit as a function
                 # message with the name.
                 out.append({"role": "tool", "content": msg.content, "name": msg.name or "tool"})
             else:

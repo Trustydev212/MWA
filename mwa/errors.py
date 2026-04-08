@@ -1,6 +1,6 @@
-"""Exception hierarchy for SOMA.
+"""Exception hierarchy for MWA.
 
-Every error raised by SOMA inherits from ``SomaError`` so callers can catch
+Every error raised by MWA inherits from ``MWAError`` so callers can catch
 the whole package with a single ``except`` clause.  More specific subclasses
 exist when callers might reasonably want to react differently — e.g. a
 hard-constraint violation should never trigger an Arbiter call, while a
@@ -10,11 +10,11 @@ value contradiction should.
 from __future__ import annotations
 
 
-class SomaError(Exception):
-    """Base class for every exception raised inside SOMA."""
+class MWAError(Exception):
+    """Base class for every exception raised inside MWA."""
 
 
-class HarnessMapError(SomaError):
+class HarnessMapError(MWAError):
     """Raised when a Harness Map is structurally invalid.
 
     Examples: unknown node referenced in ``affects``, cycle detected in the
@@ -22,7 +22,7 @@ class HarnessMapError(SomaError):
     """
 
 
-class HardConstraintViolation(SomaError):
+class HardConstraintViolation(MWAError):
     """A write would violate a hard constraint declared in the Harness Map.
 
     These are non-recoverable at the runtime level — the write is rejected
@@ -36,7 +36,7 @@ class HardConstraintViolation(SomaError):
         self.value = value
 
 
-class ConflictError(SomaError):
+class ConflictError(MWAError):
     """Two or more agents proposed contradicting values for the same node.
 
     This is the *recoverable* sibling of :class:`HardConstraintViolation`.
@@ -44,9 +44,9 @@ class ConflictError(SomaError):
     """
 
 
-class LLMProviderError(SomaError):
+class LLMProviderError(MWAError):
     """An LLM provider call failed (rate limit, network, schema, ...)."""
 
 
-class WorldModelError(SomaError):
+class WorldModelError(MWAError):
     """Generic World Model failure (storage, version mismatch, ...)."""

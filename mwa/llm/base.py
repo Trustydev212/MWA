@@ -1,7 +1,7 @@
 """Provider-agnostic types + Protocol.
 
 Everything in this module is **pure** — no SDK imports, no I/O, no
-side-effects.  That keeps ``soma.llm.base`` importable even when none
+side-effects.  That keeps ``mwa.llm.base`` importable even when none
 of the actual provider SDKs are installed, which is essential for
 testing and for composing adapters without pulling in every vendor
 SDK simultaneously.
@@ -28,7 +28,7 @@ from typing import Any, Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from soma.errors import LLMProviderError
+from mwa.errors import LLMProviderError
 
 # ---------------------------------------------------------------------------
 # Error hierarchy
@@ -147,7 +147,7 @@ class LLMProvider(Protocol):
     Callers can rely on these five methods + two properties being
     available regardless of the backing vendor.  Adapters are free to
     add more methods (e.g. Anthropic-specific cache-aware helpers) but
-    SOMA core only ever touches what's defined here.
+    MWA core only ever touches what's defined here.
     """
 
     @property

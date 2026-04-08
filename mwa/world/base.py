@@ -1,14 +1,14 @@
 """Protocol definition for World Model backends.
 
 Every storage backend (in-memory, Graphiti, Neo4j, ...) must implement
-this protocol so the rest of SOMA never touches a backend-specific API.
+this protocol so the rest of MWA never touches a backend-specific API.
 
 Why a Protocol instead of an ABC?
 ---------------------------------
 - Protocols give us *structural* typing — a backend doesn't need to inherit
   from anything, it just needs to implement the methods.  That makes
   testing with fakes trivial and lets third-party backends drop in without
-  touching SOMA imports.
+  touching MWA imports.
 - mypy still enforces the contract at type-check time.
 
 Async-by-default
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from soma.types import Conflict, Episode, Fact, WriteProposal
+from mwa.types import Conflict, Episode, Fact, WriteProposal
 
 
 @runtime_checkable

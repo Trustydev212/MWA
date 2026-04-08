@@ -1,6 +1,6 @@
 """Anthropic Claude adapter.
 
-Implements :class:`~soma.llm.base.LLMProvider` on top of the official
+Implements :class:`~mwa.llm.base.LLMProvider` on top of the official
 ``anthropic`` Python SDK.  The SDK is imported **lazily** inside
 ``__init__`` so this module stays importable even when ``anthropic``
 isn't installed — important for testing and for users who only use
@@ -8,7 +8,7 @@ other providers.
 
 Install with::
 
-    uv pip install soma[anthropic]
+    uv pip install mwa[anthropic]
 
 Structured output uses Anthropic's tool_use mechanism (forcing a single
 tool call that matches the schema).  That's more reliable than prompt
@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from soma.llm.base import (
+from mwa.llm.base import (
     ChatChunk,
     ChatOptions,
     ChatResponse,
@@ -64,7 +64,7 @@ class AnthropicProvider:
             except ImportError as exc:
                 raise PermanentProviderError(
                     "AnthropicProvider requires the `anthropic` package. "
-                    "Install with: `uv pip install soma[anthropic]`"
+                    "Install with: `uv pip install mwa[anthropic]`"
                 ) from exc
             self._client = AsyncAnthropic(api_key=api_key)
 
@@ -189,10 +189,10 @@ class AnthropicProvider:
     def _translate_messages(
         messages: Sequence[Message],
     ) -> tuple[str | None, list[dict[str, Any]]]:
-        """Split SOMA messages into (system, api_messages).
+        """Split MWA messages into (system, api_messages).
 
         Anthropic puts the system prompt in a separate field, not as a
-        message.  SOMA's neutral format uses a ``system`` role so we
+        message.  MWA's neutral format uses a ``system`` role so we
         extract those here and concatenate them in order.
         """
         system_parts: list[str] = []
@@ -202,7 +202,7 @@ class AnthropicProvider:
                 system_parts.append(msg.content)
             elif msg.role is MessageRole.TOOL:
                 # Tool results become user messages with a tool_result block
-                # — but since SOMA's base tool messages are text-only we
+                # — but since MWA's base tool messages are text-only we
                 # pass them through as user messages for now.  Rich tool
                 # message support is a later milestone.
                 api_messages.append({"role": "user", "content": msg.content})
@@ -234,7 +234,7 @@ class AnthropicProvider:
 
     @staticmethod
     def _translate_error(exc: Exception) -> Exception:
-        """Map anthropic SDK exceptions to SOMA's error hierarchy.
+        """Map anthropic SDK exceptions to MWA's error hierarchy.
 
         We only import the anthropic exception classes if they are
         already imported (they must be, since the SDK already raised).

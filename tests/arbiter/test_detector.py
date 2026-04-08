@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from soma.arbiter import ConflictDetector
-from soma.types import WriteProposal
-from soma.world import InMemoryWorldModel
+from mwa.arbiter import ConflictDetector
+from mwa.types import WriteProposal
+from mwa.world import InMemoryWorldModel
 
 
 @pytest.fixture

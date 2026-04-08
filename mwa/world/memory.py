@@ -2,7 +2,7 @@
 
 This backend exists for three reasons:
 
-1. **Tests.**  Every other layer in SOMA needs *something* to write/read
+1. **Tests.**  Every other layer in MWA needs *something* to write/read
    from in unit tests; spinning up Neo4j just to test the Arbiter is
    absurd.  In-memory storage gives us deterministic, fast, no-infra
    tests for the entire stack.
@@ -10,7 +10,7 @@ This backend exists for three reasons:
 2. **Local development.**  Quickstart examples should run with
    ``python quickstart.py`` and zero setup.  In-memory makes that work.
 
-3. **Reference implementation.**  Anyone porting SOMA to a new graph
+3. **Reference implementation.**  Anyone porting MWA to a new graph
    database can read this file in 30 minutes and understand exactly
    what semantics they need to preserve.
 
@@ -27,11 +27,11 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from soma.errors import HardConstraintViolation, WorldModelError
-from soma.types import Conflict, Episode, Fact, WriteProposal, _utcnow
+from mwa.errors import HardConstraintViolation, WorldModelError
+from mwa.types import Conflict, Episode, Fact, WriteProposal, _utcnow
 
 if TYPE_CHECKING:
-    from soma.harness import HarnessMap
+    from mwa.harness import HarnessMap
 
 
 class InMemoryWorldModel:

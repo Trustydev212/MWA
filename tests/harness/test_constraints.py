@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from soma.harness import HarnessMap
-from soma.harness.constraints import (
+from mwa.harness import HarnessMap
+from mwa.harness.constraints import (
     HardConstraintEvaluator,
     parse_constraint,
 )

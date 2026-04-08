@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from soma.llm import (
+from mwa.llm import (
     ChatOptions,
     Message,
     MessageRole,
@@ -18,7 +18,7 @@ from soma.llm import (
     ResponseSchemaError,
     TransientProviderError,
 )
-from soma.llm.providers import OpenAIProvider
+from mwa.llm.providers import OpenAIProvider
 
 # ---------------------------------------------------------------------------
 # Fake openai client
