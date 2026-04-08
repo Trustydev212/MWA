@@ -1,4 +1,4 @@
-"""End-to-end OpenClaw multi-agent builder demo.
+"""End-to-end OpenClaw multi-agent builder demo — M6 SDK edition.
 
 Run with::
 
@@ -8,51 +8,20 @@ or, from the repo root::
 
     PYTHONPATH=. python examples/openclaw_team/run_demo.py
 
-What the demo does
-------------------
-A user says "Build me a research agent that reads arXiv papers and
-extracts claims."  Four specialised OpenClaw sub-agents then
-collaborate via a shared MWA world model to design that agent:
+How the SDK version differs from the pre-M6 version
+----------------------------------------------------
+The pre-SDK version manually called ``run_architect`` → ``gather(...)``
+→ ``run_deployer`` in a fixed order.  The SDK version is **reactive**:
+you seed ``user_intent`` and the dispatcher cascades every handler
+automatically in topology order.
 
-1. **Architect-Agent** — picks architecture + sub-agent count +
-   orchestration pattern.
-2. **Security-Agent** — picks tool permissions + memory strategy.
-3. **Provider-Selector-Agent** — picks LLM backend + cost / latency
-   budgets.
-4. **Deployer-Agent** — picks deployment target + observability +
-   error handling.
+The bulk of ``main()`` is now:
 
-Agents never talk to each other directly — every decision lands in
-the shared :class:`InMemoryWorldModel` and downstream agents read
-their inputs from there.  This is the whole MWA value prop in
-miniature.
+1. Build four :class:`~mwa.sdk.WorldAgent` instances (one per builder).
+2. Seed ``user_intent``.
+3. Call ``runtime.run_until_idle()`` — dispatcher handles the rest.
 
-Two stages
-----------
-**Stage A — happy path.**  The four agents run (Architect first, then
-Security + Provider-Selector + Deployer concurrently).  All decisions
-land cleanly.  Final state printed.
-
-**Stage B — conflict + arbitration.**  We seed a *contradictory*
-Architect write on ``memory_strategy`` (Architect changed its mind
-and now wants a ``long_term_persistent`` store) with similar
-confidence to Security's existing ``short_term_conversation``.  The
-rule-based resolver can't decide so it escalates to the Semantic
-Arbiter, which picks a winner and the world settles.
-
-Offline / live mode
--------------------
-By default everything runs with :class:`FakeProvider` — no network,
-no API keys, deterministic output.  To run against a real OpenAI-
-compatible endpoint (futrixapi, OpenAI, OpenRouter, …) set::
-
-    MWA_LIVE_API_KEY=sk-...
-    MWA_LIVE_BASE_URL=https://futrixapi.com/v1
-    MWA_LIVE_MODEL=auto
-
-The demo auto-detects those env vars and switches to the real
-provider, retry-wrapped in an :class:`LLMRouter` the same way
-production code does.
+Pretty-printing adds the visual narrative, but it's optional glue.
 """
 
 from __future__ import annotations
@@ -61,21 +30,19 @@ import asyncio
 
 from examples.openclaw_team import fake_responses as fx
 from examples.openclaw_team.agents import (
-    run_architect,
-    run_deployer,
-    run_provider_selector,
-    run_security,
+    build_architect,
+    build_deployer,
+    build_provider_selector,
+    build_security,
 )
 from examples.openclaw_team.runtime import (
-    Runtime,
     build_runtime,
     is_live_mode,
     make_fake_provider,
     make_live_provider,
-    write_to_world,
 )
 from mwa.llm.base import LLMProvider
-from mwa.types import WriteProposal
+from mwa.sdk import AgentRuntime
 
 USER_INTENT = (
     "Build a research agent that reads arXiv papers and extracts "
@@ -98,7 +65,7 @@ def _section(text: str) -> None:
     print(f"\n── {text}")
 
 
-async def _print_world_state(runtime: Runtime, nodes: list[str]) -> None:
+async def _print_world_state(runtime: AgentRuntime, nodes: list[str]) -> None:
     print("\n  Final world state:")
     max_len = max(len(n) for n in nodes)
     for node in nodes:
@@ -121,10 +88,13 @@ async def _print_world_state(runtime: Runtime, nodes: list[str]) -> None:
 def _build_providers() -> dict[str, LLMProvider]:
     """One provider per agent plus one for the arbiter.
 
-    README promises each agent can use a different LLM provider — this
-    is where that promise lives in the demo.  In live mode everyone
-    shares the same router, but the *shape* of the wiring stays the
-    same so a future user can easily swap individual providers.
+    In live mode everyone shares the same retry-wrapped router — it's
+    the same gateway behind all agents, and the demo is too small to
+    justify separate API keys.  The shape still supports per-agent
+    providers (README promise) if you want it.
+
+    In offline mode every agent gets its own FakeProvider with canned
+    responses, so concurrent dispatch can't shuffle queues.
     """
     if is_live_mode():
         shared = make_live_provider()
@@ -136,9 +106,6 @@ def _build_providers() -> dict[str, LLMProvider]:
             "arbiter": shared,
         }
 
-    # Offline mode: per-agent FakeProvider pre-loaded with one
-    # happy-path response each.  The `security` provider gets a
-    # second queued response for the Stage B conflict round.
     return {
         "architect": make_fake_provider("architect", [fx.ARCHITECT_HAPPY]),
         "security": make_fake_provider(
@@ -160,47 +127,28 @@ def _build_providers() -> dict[str, LLMProvider]:
 
 
 async def _stage_a_happy_path(
-    runtime: Runtime, providers: dict[str, LLMProvider]
+    runtime: AgentRuntime,
+    providers: dict[str, LLMProvider],
 ) -> None:
-    _banner("Stage A — Happy path: four agents build an agent")
+    _banner("Stage A — Reactive happy path: seed + run_until_idle()")
     print(f"  User intent: {USER_INTENT!r}")
-
-    # Seed the user_intent — every other decision is downstream of this.
-    await write_to_world(
-        runtime,
-        WriteProposal(
-            agent_id="user",
-            node="user_intent",
-            value=USER_INTENT,
-            confidence=1.0,
-        ),
-    )
-
-    _section("Architect-Agent (sequential — everyone depends on it)")
-    arch = await run_architect(runtime, providers["architect"])
-    print(f"  → agent_architecture    = {arch.agent_architecture}")
-    print(f"  → sub_agent_count       = {arch.sub_agent_count}")
-    print(f"  → orchestration_pattern = {arch.orchestration_pattern}")
-    print(f"  → confidence            = {arch.confidence}")
-    print(f"  → reason                : {arch.reason}")
-
-    _section("Security + Provider-Selector (concurrent — both read only from Architect)")
-    sec, sel = await asyncio.gather(
-        run_security(runtime, providers["security"]),
-        run_provider_selector(runtime, providers["provider_selector"]),
-    )
-    print(f"  Security      → permissions={sec.tool_permissions}, memory={sec.memory_strategy}")
     print(
-        f"  ProviderSel   → llm={sel.llm_provider}, cost=${sel.cost_budget_usd}, "
-        f"latency={sel.latency_budget_ms}ms"
+        "\n  The four builder agents are registered on different nodes.\n"
+        "  When user_intent lands, the dispatcher fires handlers in\n"
+        "  topology order — no manual orchestration from the demo."
     )
 
-    _section("Deployer-Agent (sequential — needs Security's memory + permissions)")
-    dep = await run_deployer(runtime, providers["deployer"])
-    print(
-        f"  Deployer      → target={dep.deployment_target}, observability={dep.observability}, "
-        f"error={dep.error_handling}"
-    )
+    # Build agents.  Each constructor self-registers with the runtime
+    # and attaches its ``@agent.on("...")`` handler.
+    build_architect(runtime, providers["architect"])
+    build_security(runtime, providers["security"])
+    build_provider_selector(runtime, providers["provider_selector"])
+    build_deployer(runtime, providers["deployer"])
+
+    _section("Seeding user_intent + draining event queue")
+    await runtime.seed_world("user_intent", USER_INTENT)
+    invocations = await runtime.run_until_idle()
+    print(f"  → dispatcher fired {invocations} handler invocations")
 
     await _print_world_state(
         runtime,
@@ -221,9 +169,7 @@ async def _stage_a_happy_path(
     )
 
 
-async def _stage_b_conflict(
-    runtime: Runtime, providers: dict[str, LLMProvider]
-) -> None:
+async def _stage_b_conflict(runtime: AgentRuntime) -> None:
     _banner("Stage B — Conflict: Architect changes mind on memory_strategy")
     print(
         "  Architect-Agent now argues the research agent needs "
@@ -234,19 +180,21 @@ async def _stage_b_conflict(
 
     # Architect writes a contradicting memory_strategy with confidence
     # close to Security's — forces the rule-based resolver to escalate.
-    arch_outcome, arch_res = await write_to_world(
-        runtime,
-        WriteProposal(
-            agent_id="architect_agent",
-            node="memory_strategy",
-            value="long_term_persistent",
-            confidence=0.84,  # very close to Security's 0.82
-        ),
+    outcome, resolution = await runtime.submit_write(
+        agent_id="architect_agent",
+        node="memory_strategy",
+        value="long_term_persistent",
+        confidence=0.84,  # very close to Security's 0.82
     )
-    print(f"\n  Architect's contradicting write → {arch_outcome.upper()}")
-    if arch_res is not None:
-        print(f"    resolver: {arch_res.rule_applied or 'semantic_arbiter'}")
-        print(f"    reason  : {arch_res.reason}")
+    print(f"\n  Architect's contradicting write → {outcome.upper()}")
+    if resolution is not None:
+        print(f"    resolver: {resolution.rule_applied or 'semantic_arbiter'}")
+        print(f"    reason  : {resolution.reason}")
+
+    # Drain any downstream reactions that may have been enqueued by
+    # the write (none, for a rejected write, but we still call it so
+    # the demo keeps the "always drain after a write" discipline).
+    await runtime.run_until_idle()
 
     final = await runtime.world.read("memory_strategy")
     assert final is not None
@@ -254,7 +202,6 @@ async def _stage_b_conflict(
     print(f"  Winning agent          = {final.episode.agent_id}")
     print(f"  World version          = {runtime.world.version}")
 
-    # Audit trail — rejected writes are not gone, just hidden.
     history = await runtime.world.history("memory_strategy", include_rejected=True)
     print(f"\n  Audit trail for memory_strategy ({len(history)} episodes):")
     for fact in history:
@@ -273,13 +220,13 @@ async def _stage_b_conflict(
 
 async def main() -> None:
     mode = "LIVE" if is_live_mode() else "OFFLINE (FakeProvider)"
-    print(f"OpenClaw team demo — mode: {mode}")
+    print(f"OpenClaw team demo (M6 SDK edition) — mode: {mode}")
 
     providers = _build_providers()
     runtime = build_runtime(providers["arbiter"])
 
     await _stage_a_happy_path(runtime, providers)
-    await _stage_b_conflict(runtime, providers)
+    await _stage_b_conflict(runtime)
 
     _banner("Demo complete")
     print(
