@@ -89,6 +89,39 @@ class WriteProposal(BaseModel):
     node: str
     value: Any
     confidence: float = Field(ge=0.0, le=1.0, default=0.8)
+    causal_parents: tuple[str, ...] = Field(default_factory=tuple)
+
+
+class Fact(BaseModel):
+    """Temporal view of an :class:`Episode` inside a :class:`WorldModel`.
+
+    An ``Episode`` is the immutable record of *what was written*.  A ``Fact``
+    is the world model's *view* of that episode at a moment in time — it
+    knows when the episode became valid, whether it is still valid, and (if
+    superseded) when it stopped being valid.
+
+    The split exists so ``Episode`` can stay frozen and replayable while
+    ``Fact`` carries the lifecycle metadata that the storage layer alone
+    knows.  ``Fact`` is also frozen — to "update" a fact you build a new one.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    episode: Episode
+    valid_from: datetime
+    valid_to: datetime | None = None
+    """``None`` means the fact is still valid right now."""
+
+    is_current: bool = False
+    """``True`` iff this is the value the World Model would return for a
+    plain ``read(node)``.  At most one fact per node may be current."""
+
+    is_rejected: bool = False
+    """``True`` iff the underlying write proposal lost a conflict and was
+    never made current.  Rejected facts are kept for audit but never
+    returned by plain ``read(node)``."""
+
+    rejection_reason: str | None = None
 
 
 class Conflict(BaseModel):
