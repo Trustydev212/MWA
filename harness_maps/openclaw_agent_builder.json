@@ -1,0 +1,115 @@
+{
+  "version": "1.0",
+  "domain": "openclaw_agent_builder",
+  "nodes": {
+    "user_intent": {
+      "impact": "critical",
+      "affects": [
+        "agent_architecture",
+        "llm_provider",
+        "memory_strategy",
+        "tool_permissions",
+        "testing_strategy"
+      ],
+      "order": 1,
+      "description": "What the user wants the built agent system to do — root of every other decision"
+    },
+    "agent_architecture": {
+      "impact": "high",
+      "affects": [
+        "sub_agent_count",
+        "orchestration_pattern",
+        "deployment_target"
+      ],
+      "order": 2,
+      "description": "Single-agent vs. multi-agent vs. hierarchical supervisor/worker layout"
+    },
+    "llm_provider": {
+      "impact": "high",
+      "affects": ["cost_budget", "latency_budget", "prompt_template"],
+      "order": 2,
+      "description": "Which LLM provider backs the agent (Claude / GPT-4o / local Llama / router chain)"
+    },
+    "memory_strategy": {
+      "impact": "high",
+      "affects": ["deployment_target"],
+      "order": 2,
+      "description": "Stateless / short-term (conversation) / long-term (persistent store)"
+    },
+    "tool_permissions": {
+      "impact": "high",
+      "affects": ["error_handling"],
+      "order": 2,
+      "description": "read_only / read_write / admin — defines what side-effects the agent can cause"
+    },
+    "sub_agent_count": {
+      "impact": "medium",
+      "affects": ["cost_budget", "orchestration_pattern"],
+      "order": 3,
+      "description": "How many sub-agents the system spawns"
+    },
+    "orchestration_pattern": {
+      "impact": "medium",
+      "affects": ["latency_budget", "observability"],
+      "order": 3,
+      "description": "sequential / parallel / event-driven / consensus"
+    },
+    "prompt_template": {
+      "impact": "medium",
+      "affects": [],
+      "order": 3,
+      "description": "System prompt structure and few-shot examples"
+    },
+    "testing_strategy": {
+      "impact": "medium",
+      "affects": [],
+      "order": 3,
+      "description": "Unit test / eval-based / human-in-the-loop / none"
+    },
+    "deployment_target": {
+      "impact": "medium",
+      "affects": ["observability"],
+      "order": 3,
+      "description": "local / cloud / edge / embedded"
+    },
+    "cost_budget": {
+      "impact": "low",
+      "affects": [],
+      "order": 4,
+      "description": "Maximum USD per agent run"
+    },
+    "latency_budget": {
+      "impact": "low",
+      "affects": [],
+      "order": 4,
+      "description": "Maximum wall-clock ms per agent run"
+    },
+    "error_handling": {
+      "impact": "low",
+      "affects": [],
+      "order": 4,
+      "description": "retry / fallback chain / fail-fast / human-escalation"
+    },
+    "observability": {
+      "impact": "low",
+      "affects": [],
+      "order": 4,
+      "description": "Which signals the runtime emits: logs / metrics / traces / none"
+    }
+  },
+  "hard_constraints": [
+    "memory_strategy stateful không compatible với deployment_target edge",
+    "tool_permissions admin không compatible với error_handling retry",
+    "orchestration_pattern không thể đồng thời là sequential và parallel"
+  ],
+  "conflict_resolution": {
+    "default_strategy": "arbiter",
+    "auto_resolve_threshold": 0.85,
+    "scoring_weights": {
+      "structural_importance": 0.35,
+      "causal_depth": 0.25,
+      "downstream_impact": 0.25,
+      "confidence": 0.15
+    }
+  }
+}

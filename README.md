@@ -106,44 +106,52 @@ MWA giải quyết bài toán: **làm sao để nhiều agents chia sẻ một "
 ### 1. Harness Map (`harness.map.json`)
 Bản đồ dependency của World Model — define một lần, tất cả agents dùng chung.
 
+Ví dụ dưới đây mô tả domain **OpenClaw** — một meta-agent builder dùng MWA
+làm coordination substrate để nhiều sub-agent cùng build một agent mới
+cho user. Architect-Agent quyết kiến trúc, Security-Agent quyết
+permissions/memory, Provider-Selector-Agent quyết LLM backend, tất cả
+share cùng World Model.
+
 ```json
 {
   "version": "1.0",
-  "domain": "video_ad_production",
+  "domain": "openclaw_agent_builder",
   "nodes": {
-    "campaign_goal": {
+    "user_intent": {
       "impact": "critical",
-      "affects": ["tone", "duration", "cta", "target_audience"],
+      "affects": ["agent_architecture", "llm_provider", "memory_strategy", "tool_permissions", "testing_strategy"],
       "order": 1,
-      "description": "Mục tiêu chính của campaign"
+      "description": "What the user wants the built agent system to do"
     },
-    "tone": {
+    "agent_architecture": {
       "impact": "high",
-      "affects": ["script_language", "visual_style", "music_mood"],
+      "affects": ["sub_agent_count", "orchestration_pattern", "deployment_target"],
       "order": 2,
-      "description": "Tone tổng thể của video"
+      "description": "single-agent vs multi-agent vs hierarchical supervisor/worker"
     },
-    "duration": {
+    "llm_provider": {
       "impact": "high",
-      "affects": ["scene_count", "script_length", "cut_pace"],
+      "affects": ["cost_budget", "latency_budget", "prompt_template"],
       "order": 2,
-      "description": "Độ dài video tính bằng giây"
+      "description": "Claude / GPT-4o / local Llama / router chain"
     },
-    "visual_style": {
-      "impact": "medium",
-      "affects": ["color_palette", "font_choice", "animation_type"],
-      "order": 3
+    "memory_strategy": {
+      "impact": "high",
+      "affects": ["deployment_target"],
+      "order": 2,
+      "description": "stateless / short-term / long-term persistent"
     },
-    "script_language": {
-      "impact": "medium",
-      "affects": ["caption_style", "voiceover_tone"],
-      "order": 3
+    "tool_permissions": {
+      "impact": "high",
+      "affects": ["error_handling"],
+      "order": 2,
+      "description": "read_only / read_write / admin"
     }
   },
   "hard_constraints": [
-    "duration không thể đồng thời là 15s và 60s",
-    "tone không thể đồng thời là formal và casual",
-    "visual_style cartoon không compatible với tone corporate"
+    "memory_strategy stateful không compatible với deployment_target edge",
+    "tool_permissions admin không compatible với error_handling retry",
+    "orchestration_pattern không thể đồng thời là sequential và parallel"
   ],
   "conflict_resolution": {
     "default_strategy": "arbiter",
@@ -158,6 +166,9 @@ Bản đồ dependency của World Model — define một lần, tất cả agen
 }
 ```
 
+> File đầy đủ ở `harness_maps/openclaw_agent_builder.json` — 14 node, 3 hard
+> constraint, là bản đồ thật chạy được trong quickstart.
+
 ---
 
 ### 2. World Model (Graph DB)
@@ -166,7 +177,7 @@ Dùng **Graphiti** làm core engine (open source, temporal, hybrid retrieval):
 
 ```
 World Model = Temporal Knowledge Graph
-  - Nodes:  entities (campaign_goal, tone, script, visual...)
+  - Nodes:  entities (user_intent, agent_architecture, llm_provider...)
   - Edges:  relationships + causal dependencies
   - Facts:  mỗi fact có valid_at, invalid_at
   - Episodes: mỗi agent write = một episode có provenance
@@ -266,7 +277,7 @@ from mwa.llm import LLMProvider
 # LLM provider là pluggable — Claude, OpenAI, Gemini, Mistral,
 # Groq, DeepSeek, Ollama, vLLM, bất kỳ provider nào tương thích
 agent = WorldAgent(
-    name="script_writer",
+    name="architect_agent",
     harness_map="./harness.map.json",
     llm=LLMProvider.from_config({
         "provider": "anthropic",         # hoặc "openai" / "gemini" / "mistral" / "groq" / "ollama" / "vllm" / ...
@@ -276,17 +287,17 @@ agent = WorldAgent(
 )
 
 # Đọc từ World Model (Graph RAG — không scan full DB)
-tone = agent.world.read("tone")
-duration = agent.world.read("duration")
+user_intent = agent.world.read("user_intent")
+llm_provider = agent.world.read("llm_provider")
 
 # Viết vào World Model
-agent.world.write("script_language", "conversational", confidence=0.9)
+agent.world.write("agent_architecture", "multi_agent", confidence=0.9)
 
 # React khi world thay đổi
-@agent.on_world_update("tone")
-def handle_tone_change(new_value, reason):
-    # Cập nhật script language theo tone mới
-    agent.world.write("script_language", adapt_to_tone(new_value))
+@agent.on_world_update("llm_provider")
+def handle_provider_change(new_value, reason):
+    # Điều chỉnh cost_budget dựa trên provider vừa được chọn
+    agent.world.write("cost_budget", estimate_budget_for(new_value))
 
 # Start — agent chạy concurrent với các agents khác
 agent.start()
@@ -447,9 +458,10 @@ any_llm = LLMProvider.openrouter(model="deepseek/deepseek-r1", api_key_env="OPEN
 proxy_llm = LLMProvider.litellm(base_url="http://localhost:4000", model="claude-opus-4-6")
 ```
 
-**Mỗi agent có thể dùng một provider khác nhau.** Arbiter có thể là Claude,
-script_writer có thể là GPT-4o, visual_planner có thể là local Llama —
-tất cả cùng share một World Model.
+**Mỗi agent có thể dùng một provider khác nhau.** Trong OpenClaw, Arbiter
+có thể là Claude (tốt nhất cho reasoning), architect_agent có thể là GPT-4o
+(cân bằng cost/quality), security_agent có thể là local Llama (offline cho
+guardrail review) — tất cả cùng share một World Model.
 
 ---
 
@@ -524,12 +536,12 @@ mwa/
 │   └── tools.py
 │
 ├── examples/
-│   ├── quickstart/              ← 2 agents, minimal setup
-│   ├── neuvell_studio/          ← Video ad production use case
+│   ├── quickstart/              ← 2 agents build an agent (OpenClaw)
+│   ├── openclaw_team/           ← Multi-agent agent-builder team
 │   └── code_team/               ← 3-agent coding team
 │
 ├── harness_maps/                ← Example harness maps
-│   ├── video_production.json
+│   ├── openclaw_agent_builder.json  ← meta-agent-builder domain
 │   ├── software_development.json
 │   └── research_pipeline.json
 │
@@ -582,48 +594,52 @@ curl http://localhost:8765  # MWA WebSocket server
 ### 3. Define Harness Map
 
 ```bash
-cp harness_maps/video_production.json ./my_harness.map.json
+cp harness_maps/openclaw_agent_builder.json ./my_harness.map.json
 # Edit để phù hợp với domain của bạn
 ```
 
 ### 4. Build agents đầu tiên
 
 ```python
-# agent_a.py — Script Writer (dùng OpenAI GPT-4o)
+# architect_agent.py — OpenClaw Architect (dùng OpenAI GPT-4o)
 from mwa import WorldAgent
 from mwa.llm import LLMProvider
 
 agent = WorldAgent(
-    name="script_writer",
+    name="architect_agent",
     harness_map="./my_harness.map.json",
     mwa_url="ws://localhost:8765",
     llm=LLMProvider.openai(model="gpt-4o")  # đọc OPENAI_API_KEY từ env
 )
 
-@agent.on_world_update("campaign_goal")
-async def on_goal_change(new_value, context):
-    script = await generate_script(new_value, context)
-    await agent.world.write("script_content", script, confidence=0.85)
+@agent.on_world_update("user_intent")
+async def on_intent_change(new_value, context):
+    # User đổi ý về agent cần build → architect design lại cấu trúc
+    architecture = await design_architecture(new_value, context)
+    await agent.world.write("agent_architecture", architecture, confidence=0.9)
+    sub_count = count_sub_agents(architecture)
+    await agent.world.write("sub_agent_count", sub_count, confidence=0.85)
 
 await agent.start()
 ```
 
 ```python
-# agent_b.py — Visual Planner (dùng local Llama qua Ollama)
+# security_agent.py — OpenClaw Security Guardrails (dùng local Llama qua Ollama)
 from mwa import WorldAgent
 from mwa.llm import LLMProvider
 
 agent = WorldAgent(
-    name="visual_planner",
+    name="security_agent",
     harness_map="./my_harness.map.json",
     mwa_url="ws://localhost:8765",
     llm=LLMProvider.ollama(model="llama3.3:70b")
 )
 
-@agent.on_world_update("tone")
-async def on_tone_change(new_value, context):
-    visual_style = await plan_visuals(new_value, context)
-    await agent.world.write("visual_style", visual_style, confidence=0.9)
+@agent.on_world_update("agent_architecture")
+async def on_arch_change(new_value, context):
+    # Architect đổi kiến trúc → security re-assess permissions needed
+    perms = await audit_permissions(new_value, context)
+    await agent.world.write("tool_permissions", perms, confidence=0.92)
 
 await agent.start()
 ```
@@ -631,11 +647,13 @@ await agent.start()
 > Hai agents trên dùng **hai provider hoàn toàn khác nhau** (OpenAI cloud +
 > local Ollama) nhưng vẫn cùng share một World Model. Arbiter có thể dùng
 > provider thứ ba (vd. Claude). MWA không quan tâm — provider là pluggable.
+> Đây chính là mô hình OpenClaw dùng trong production để build agent mới:
+> architect/security/deployer chạy song song, đồng bộ qua World Model.
 
 ```bash
 # Chạy cả hai agents đồng thời
-python agent_a.py &
-python agent_b.py &
+python architect_agent.py &
+python security_agent.py &
 ```
 
 ### 5. Observe world state
@@ -682,7 +700,7 @@ Phase 3 — Production (Tuần 9-12)
   [ ] Docker Compose template
   [ ] PyPI package
   [ ] Performance benchmarks
-  [ ] Neuvell Studio integration
+  [ ] OpenClaw integration (meta-agent builder runtime)
   [ ] Documentation đầy đủ
 
 Phase 4 — Open Source (Tháng 4+)

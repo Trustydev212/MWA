@@ -330,9 +330,11 @@ cheap_router = LLMRouter.cheapest_first([
 ### Per-Agent Provider Selection
 
 Mỗi agent có thể dùng provider riêng. Arbiter cũng có provider riêng.
-Việc Arbiter dùng Claude trong khi script_writer dùng GPT-4o và
-visual_planner dùng local Llama là hoàn toàn hợp lệ — World Model là
-single source of truth, không phụ thuộc vào agent dùng LLM nào.
+Trong OpenClaw use case, Arbiter dùng Claude (best reasoning) trong khi
+architect_agent dùng GPT-4o (balanced cost/quality) và security_agent
+dùng local Llama (offline cho guardrail review) là hoàn toàn hợp lệ —
+World Model là single source of truth, không phụ thuộc vào agent dùng
+LLM nào.
 
 ```python
 runtime = MWARuntime(
@@ -341,9 +343,9 @@ runtime = MWARuntime(
     arbiter_llm=LLMProvider.anthropic(model="claude-opus-4-6"),
 )
 
-runtime.register_agent("script_writer", llm=LLMProvider.openai(model="gpt-4o"))
-runtime.register_agent("visual_planner", llm=LLMProvider.ollama(model="llama3.3:70b"))
-runtime.register_agent("caption_writer", llm=LLMProvider.gemini(model="gemini-2.5-flash"))
+runtime.register_agent("architect_agent",   llm=LLMProvider.openai(model="gpt-4o"))
+runtime.register_agent("security_agent",    llm=LLMProvider.ollama(model="llama3.3:70b"))
+runtime.register_agent("deployment_agent",  llm=LLMProvider.gemini(model="gemini-2.5-flash"))
 ```
 
 ### Arbiter Prompt Architecture

@@ -27,7 +27,7 @@ from pydantic import ValidationError
 
 from mwa.errors import HarnessMapError
 from mwa.harness.constraints import ConstraintViolation, HardConstraintEvaluator
-from mwa.harness.schema import HarnessNodeSchema, HarnessSchema
+from mwa.harness.schema import ConflictResolutionConfig, HarnessNodeSchema, HarnessSchema
 from mwa.types import Impact
 
 
@@ -249,3 +249,13 @@ class HarnessMap:
     @property
     def hard_constraints(self) -> list[str]:
         return self._evaluator.constraints
+
+    @property
+    def conflict_resolution(self) -> ConflictResolutionConfig:
+        """Runtime conflict-resolution config (strategy + scoring weights).
+
+        Exposed for the Semantic Arbiter and any other layer that needs
+        to honour ``auto_resolve_threshold`` or the per-criterion weights
+        declared in the harness map.
+        """
+        return self._schema.conflict_resolution
