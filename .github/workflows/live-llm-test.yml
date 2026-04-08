@@ -144,4 +144,7 @@ jobs:
           MWA_LIVE_BASE_URL: ${{ secrets.MWA_LIVE_BASE_URL }}
           MWA_LIVE_MODEL: ${{ secrets.MWA_LIVE_MODEL }}
         run: |
-          uv run pytest -m integration tests/llm/test_live_openai_compat.py -v --tb=short
+          uv run pytest -m integration \
+            tests/llm/test_live_openai_compat.py \
+            tests/arbiter/test_semantic_live.py \
+            -v --tb=short

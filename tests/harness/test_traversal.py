@@ -35,9 +35,13 @@ def diamond_map() -> HarnessMap:
 
 
 @pytest.fixture
-def video_map() -> HarnessMap:
-    """The example map from README."""
-    path = Path(__file__).resolve().parents[2] / "harness_maps" / "video_production.json"
+def openclaw_map() -> HarnessMap:
+    """The example OpenClaw meta-agent-builder map from README."""
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "harness_maps"
+        / "openclaw_agent_builder.json"
+    )
     return HarnessMap.load(path)
 
 
@@ -161,18 +165,19 @@ def test_subgraph_unknown_node_raises(diamond_map: HarnessMap) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_video_map_loads_and_is_acyclic(video_map: HarnessMap) -> None:
-    assert video_map.domain == "video_ad_production"
-    order = video_map.topological_order()
-    assert order[0] == "campaign_goal", "campaign_goal must be the root"
-    assert len(order) == len(video_map)
+def test_openclaw_map_loads_and_is_acyclic(openclaw_map: HarnessMap) -> None:
+    assert openclaw_map.domain == "openclaw_agent_builder"
+    order = openclaw_map.topological_order()
+    assert order[0] == "user_intent", "user_intent must be the root"
+    assert len(order) == len(openclaw_map)
 
 
-def test_video_map_campaign_goal_propagates_widely(video_map: HarnessMap) -> None:
-    affected = video_map.traverse_downstream("campaign_goal")
+def test_openclaw_map_user_intent_propagates_widely(openclaw_map: HarnessMap) -> None:
+    """user_intent is the root — every other node must be downstream of it."""
+    affected = openclaw_map.traverse_downstream("user_intent")
     # Should reach leaf nodes through several hops
-    assert "color_palette" in affected
-    assert "voiceover_tone" in affected
-    assert "scene_count" in affected
+    assert "cost_budget" in affected
+    assert "observability" in affected
+    assert "error_handling" in affected
     # Every other node must be downstream of the root
-    assert set(affected) == set(video_map) - {"campaign_goal"}
+    assert set(affected) == set(openclaw_map) - {"user_intent"}
