@@ -87,7 +87,7 @@ jobs:
           MWA_LIVE_MODEL: ${{ secrets.MWA_LIVE_MODEL }}
         run: |
           python - <<'PY'
-          import asyncio, os, json
+          import asyncio, os, sys, json
           from mwa.llm.base import ChatOptions, Message, MessageRole
           from mwa.llm.providers import OpenAIProvider
 
@@ -97,6 +97,22 @@ jobs:
           model    = os.environ["MWA_LIVE_MODEL"].strip()
           api_key  = os.environ["MWA_LIVE_API_KEY"].strip()
           base_url = os.environ["MWA_LIVE_BASE_URL"].strip()
+
+          # Diagnostic: secret values are masked as *** in log, so print only
+          # structural info so we can see what kind of malformed input we got.
+          print(f"[probe] base_url length        = {len(base_url)}")
+          print(f"[probe] base_url starts https://= {base_url.startswith('https://')}")
+          print(f"[probe] base_url starts http:// = {base_url.startswith('http://')}")
+          print(f"[probe] api_key  length        = {len(api_key)}")
+          print(f"[probe] model    length        = {len(model)}")
+
+          if not base_url.startswith(("http://", "https://")):
+              sys.exit(
+                  "FATAL: MWA_LIVE_BASE_URL must start with 'http://' or 'https://'. "
+                  "Your current secret is missing the scheme — delete the secret in "
+                  "Settings → Secrets and variables → Actions → MWA_LIVE_BASE_URL → "
+                  "and re-add it with the full URL (e.g. 'https://futrixapi.com/v1')."
+              )
 
           async def main() -> None:
               provider = OpenAIProvider(
