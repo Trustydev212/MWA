@@ -83,17 +83,8 @@ class OpenAIProvider:
         opts = options or ChatOptions()
 
         try:
-            # The openai SDK types messages as strict TypedDicts; MWA's
-            # neutral Message format intentionally stays simpler, so we
-            # silence the messages arg-type check.  Wire format is still
-            # exactly what the SDK expects.
             raw = await self._client.chat.completions.create(
-                model=self._model,
-                messages=api_messages,  # type: ignore[arg-type]
-                temperature=opts.temperature,
-                max_tokens=opts.max_tokens,
-                top_p=opts.top_p,
-                stop=list(opts.stop) or None,
+                **self._build_request_kwargs(api_messages, opts)
             )
         except Exception as exc:  # pragma: no cover
             raise self._translate_error(exc) from exc
@@ -110,18 +101,10 @@ class OpenAIProvider:
         opts = options or ChatOptions()
 
         try:
-            # stream=True picks the AsyncStream overload; messages silenced
-            # for the same reason as chat().
             stream = await self._client.chat.completions.create(
-                model=self._model,
-                messages=api_messages,  # type: ignore[arg-type]
-                temperature=opts.temperature,
-                max_tokens=opts.max_tokens,
-                top_p=opts.top_p,
-                stop=list(opts.stop) or None,
-                stream=True,
+                **self._build_request_kwargs(api_messages, opts, stream=True)
             )
-            async for event in stream:  # type: ignore[union-attr]
+            async for event in stream:
                 choice = event.choices[0] if event.choices else None
                 if choice is None:
                     continue
@@ -153,16 +136,10 @@ class OpenAIProvider:
         }
 
         try:
-            # response_format is a hand-built dict rather than the SDK's
-            # strict TypedDict; messages silenced for the same reason as
-            # chat().  Together this confuses overload resolution so we
-            # silence the whole call-overload selection here.
-            raw = await self._client.chat.completions.create(  # type: ignore[call-overload]
-                model=self._model,
-                messages=api_messages,
-                temperature=opts.temperature,
-                max_tokens=opts.max_tokens,
-                response_format=response_format,
+            raw = await self._client.chat.completions.create(
+                **self._build_request_kwargs(
+                    api_messages, opts, response_format=response_format
+                )
             )
         except Exception as exc:  # pragma: no cover
             raise self._translate_error(exc) from exc
@@ -185,6 +162,35 @@ class OpenAIProvider:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    def _build_request_kwargs(
+        self,
+        api_messages: list[dict[str, Any]],
+        opts: ChatOptions,
+        **extra: Any,
+    ) -> dict[str, Any]:
+        """Build the kwargs dict passed to ``chat.completions.create``.
+
+        Optional fields are only added when the caller actually set them.
+        OpenAI's own API is lenient and accepts ``null`` for every optional
+        field, but third-party OpenAI-compatible gateways (futrixapi,
+        LiteLLM, OpenRouter, ...) vary: some reject ``{"top_p": null}``
+        with a 400.  The only portable thing to do is omit fields we don't
+        care about instead of sending explicit nulls.
+        """
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": api_messages,
+            "temperature": opts.temperature,
+        }
+        if opts.max_tokens is not None:
+            kwargs["max_tokens"] = opts.max_tokens
+        if opts.top_p is not None:
+            kwargs["top_p"] = opts.top_p
+        if opts.stop:
+            kwargs["stop"] = list(opts.stop)
+        kwargs.update(extra)
+        return kwargs
 
     @staticmethod
     def _translate_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
@@ -234,6 +240,14 @@ class OpenAIProvider:
             return RateLimitError(msg)
         if "APIConnection" in name or "Timeout" in name or "InternalServer" in name:
             return TransientProviderError(msg)
-        if "Authentication" in name or "PermissionDenied" in name or "NotFound" in name:
+        # BadRequest / 400 = malformed payload, retrying is pointless.
+        # Authentication / NotFound / PermissionDenied = same story.
+        if (
+            "BadRequest" in name
+            or "400" in msg
+            or "Authentication" in name
+            or "PermissionDenied" in name
+            or "NotFound" in name
+        ):
             return PermanentProviderError(msg)
         return TransientProviderError(msg)

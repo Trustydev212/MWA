@@ -132,6 +132,48 @@ async def test_chat_translates_messages_and_parses_response(
     assert call["max_tokens"] == 50
 
 
+async def test_chat_omits_none_optional_fields_from_request(
+    provider: OpenAIProvider,
+    fake_client: _FakeOpenAIClient,
+) -> None:
+    """Strict OpenAI-compatible gateways (e.g. futrixapi) reject explicit
+    ``null`` values for ``top_p`` / ``max_tokens`` / ``stop``.  We must
+    omit them entirely when the caller didn't set them, not send nulls.
+    """
+    fake_client.chat.completions.will_return(
+        _FakeResponse(choices=[_FakeChoice(message=_FakeMessage(content="ok"))])
+    )
+    await provider.chat(
+        [Message(role=MessageRole.USER, content="hi")],
+        options=ChatOptions(),  # all optional fields at their default None / empty
+    )
+    call = fake_client.chat.completions.create_calls[0]
+    assert "top_p" not in call
+    assert "max_tokens" not in call
+    assert "stop" not in call
+    # But required / explicitly-set fields are always present:
+    assert call["model"] == "gpt-test"
+    assert "messages" in call
+    assert call["temperature"] == 0.0  # default
+
+
+async def test_chat_includes_explicit_optional_fields(
+    provider: OpenAIProvider,
+    fake_client: _FakeOpenAIClient,
+) -> None:
+    fake_client.chat.completions.will_return(
+        _FakeResponse(choices=[_FakeChoice(message=_FakeMessage(content="ok"))])
+    )
+    await provider.chat(
+        [Message(role=MessageRole.USER, content="hi")],
+        options=ChatOptions(max_tokens=128, top_p=0.9, stop=("STOP",)),
+    )
+    call = fake_client.chat.completions.create_calls[0]
+    assert call["max_tokens"] == 128
+    assert call["top_p"] == 0.9
+    assert call["stop"] == ["STOP"]
+
+
 # ---------------------------------------------------------------------------
 # Errors
 # ---------------------------------------------------------------------------
@@ -158,6 +200,13 @@ class _FakeConn(Exception):
 _FakeConn.__name__ = "APIConnectionError"
 
 
+class _FakeBadRequest(Exception):
+    pass
+
+
+_FakeBadRequest.__name__ = "BadRequestError"
+
+
 async def test_rate_limit_translation(
     provider: OpenAIProvider, fake_client: _FakeOpenAIClient
 ) -> None:
@@ -168,6 +217,17 @@ async def test_rate_limit_translation(
 
 async def test_auth_is_permanent(provider: OpenAIProvider, fake_client: _FakeOpenAIClient) -> None:
     fake_client.chat.completions.will_raise(_FakeAuth("bad"))
+    with pytest.raises(PermanentProviderError):
+        await provider.chat([Message(role=MessageRole.USER, content="hi")])
+
+
+async def test_bad_request_is_permanent(
+    provider: OpenAIProvider, fake_client: _FakeOpenAIClient
+) -> None:
+    """HTTP 400 means the payload is malformed — retry will fail identically."""
+    fake_client.chat.completions.will_raise(
+        _FakeBadRequest("Error code: 400 - top_p: Invalid input: expected number, received null")
+    )
     with pytest.raises(PermanentProviderError):
         await provider.chat([Message(role=MessageRole.USER, content="hi")])
 
