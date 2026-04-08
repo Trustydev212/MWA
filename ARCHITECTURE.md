@@ -27,9 +27,19 @@ MWA là một **runtime layer** ngồi giữa LLM agents và infrastructure. Age
 │  ┌──────────────────────▼──────────────────────────┐   │
 │  │  Coordination Layer                             │   │
 │  │  - Conflict Detector                            │   │
-│  │  - Semantic Arbiter                             │   │
-│  │  - Resolution Protocol                         │   │
-│  └──────────────────────┬──────────────────────────┘   │
+│  │  - Semantic Arbiter   ──────────┐               │   │
+│  │  - Resolution Protocol          │               │   │
+│  └──────────────────────┬──────────┼───────────────┘   │
+│                         │          │                   │
+│                         │   ┌──────▼──────────────┐    │
+│                         │   │  LLM Provider Layer │    │
+│                         │   │  (provider-agnostic)│    │
+│                         │   │  Anthropic │ OpenAI │    │
+│                         │   │  Gemini │ xAI │ ... │    │
+│                         │   │  OpenRouter │ Groq  │    │
+│                         │   │  Ollama │ vLLM │ TGI│    │
+│                         │   │  + Router & Fallback│    │
+│                         │   └─────────────────────┘    │
 │                         │                               │
 │  ┌──────────────────────▼──────────────────────────┐   │
 │  │  World Model Layer                              │   │
@@ -245,6 +255,95 @@ class ArbiterScore:
             self.downstream_impact * w.downstream +
             self.confidence * w.confidence
         )
+```
+
+### Provider-agnostic LLM Layer
+
+Arbiter — và mọi LLM call khác trong MWA — đi qua một interface thống nhất
+`LLMProvider`. Không có hard dependency vào Anthropic, OpenAI hay bất kỳ
+SDK nào cụ thể. Provider là pluggable và có thể swap runtime.
+
+```python
+from typing import Protocol, AsyncIterator
+
+class LLMProvider(Protocol):
+    """Universal interface — mọi provider phải implement."""
+    name: str
+    model: str
+
+    async def chat(
+        self,
+        messages: list[Message],
+        *,
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+        tools: list[Tool] | None = None,
+        response_schema: type[BaseModel] | None = None,
+    ) -> ChatResponse: ...
+
+    async def stream(
+        self, messages: list[Message], **kwargs
+    ) -> AsyncIterator[ChatChunk]: ...
+
+    async def structured(
+        self, messages: list[Message], schema: type[T]
+    ) -> T:
+        """Structured output — provider tự pick best mechanism
+        (Anthropic tool use, OpenAI JSON mode, Gemini schema, …)."""
+
+    def estimate_cost(self, usage: Usage) -> Decimal: ...
+    def count_tokens(self, text: str) -> int: ...
+
+
+# Built-in adapters (mwa/llm/providers/*):
+#   anthropic, openai, gemini, xai, mistral, cohere, deepseek,
+#   openrouter, groq, together, fireworks, perplexity, litellm,
+#   ollama, vllm, tgi, llamacpp, lmstudio, openai_compat
+```
+
+### Provider Routing & Fallback
+
+```python
+from mwa.llm import LLMRouter, LLMProvider
+
+# Router cho phép fallback chain — provider chính fail → fallback
+arbiter_llm = LLMRouter(
+    primary=LLMProvider.anthropic(model="claude-opus-4-6"),
+    fallbacks=[
+        LLMProvider.openai(model="gpt-4o"),
+        LLMProvider.gemini(model="gemini-2.5-pro"),
+        LLMProvider.openrouter(model="deepseek/deepseek-r1"),
+    ],
+    on_error=("rate_limit", "timeout", "5xx"),
+    budget_per_call_usd=0.50,
+)
+
+# Hoặc cost-aware routing
+cheap_router = LLMRouter.cheapest_first([
+    LLMProvider.ollama(model="llama3.3:70b"),       # local — free
+    LLMProvider.groq(model="llama-3.3-70b"),         # rất rẻ + nhanh
+    LLMProvider.gemini(model="gemini-2.5-flash"),
+    LLMProvider.anthropic(model="claude-haiku-4-5"),
+])
+```
+
+### Per-Agent Provider Selection
+
+Mỗi agent có thể dùng provider riêng. Arbiter cũng có provider riêng.
+Việc Arbiter dùng Claude trong khi script_writer dùng GPT-4o và
+visual_planner dùng local Llama là hoàn toàn hợp lệ — World Model là
+single source of truth, không phụ thuộc vào agent dùng LLM nào.
+
+```python
+runtime = MWARuntime(
+    world=WorldModel(...),
+    harness_map=HarnessMap.load("./harness.map.json"),
+    arbiter_llm=LLMProvider.anthropic(model="claude-opus-4-6"),
+)
+
+runtime.register_agent("script_writer", llm=LLMProvider.openai(model="gpt-4o"))
+runtime.register_agent("visual_planner", llm=LLMProvider.ollama(model="llama3.3:70b"))
+runtime.register_agent("caption_writer", llm=LLMProvider.gemini(model="gemini-2.5-flash"))
 ```
 
 ### Arbiter Prompt Architecture
@@ -474,6 +573,10 @@ GET /api/causal/{node}
 |---------|-----------|
 | Arbiter sai | Confidence threshold + human escalation |
 | Arbiter chậm | Cache common patterns + rule-based fast path |
+| LLM provider down | `LLMRouter` fallback chain (Claude → GPT-4o → Gemini → local) |
+| LLM rate limit | Retry với backoff + auto-failover sang provider khác |
+| LLM cost spike | Per-call budget cap + cost-aware routing (cheapest-first) |
+| Vendor lock-in | Provider-agnostic `LLMProvider` interface — swap runtime |
 | DB down | Agent local cache + sync khi reconnect |
 | WebSocket drop | Reconnect + replay missed events từ version |
 | Infinite loser loop | Max retry limit + human-in-the-loop trigger |
