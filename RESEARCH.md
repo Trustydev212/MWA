@@ -158,6 +158,112 @@ TRONG list, không chỉ khi `==`.
 
 ---
 
+## Milestone 3 — In-memory World Model + Conflict Detector + Rule-based Resolver
+
+### Decision: Episode immutable + separate `Fact` for temporal view
+
+Đã cân nhắc 3 approach cho temporal storage:
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **Mutable Episode với valid_to field** | đơn giản | phá frozen invariant, lost the immutability story |
+| **Sentinel "invalidation" episodes** | append-only | conflate writes & invalidations, log noisy |
+| **Episode frozen + Fact view (chosen)** | giữ frozen, clean separation | cần 2 types thay vì 1 |
+
+`Episode` = "what was written" (immutable). `Fact` = "what the world model
+sees right now about that episode" (frozen view, but rebuilt on read).
+Lifecycle metadata (`valid_from`, `valid_to`, `is_current`, `is_rejected`)
+sống trong `_Lifecycle` private dataclass bên trong `InMemoryWorldModel`.
+
+### Decision: WorldModel enforce hard constraints, NOT just storage
+
+Initially nghĩ tách concerns: world = storage, harness = constraints,
+caller wires together. Nhưng nếu `apply()` không enforce thì có 2 problems:
+
+1. Mỗi caller phải nhớ check trước khi gọi → easy to forget → silent corruption
+2. Mỗi caller có thể check khác nhau → inconsistent semantics
+
+**Quyết định:** `InMemoryWorldModel` accept optional `HarnessMap` ở
+constructor. Nếu có thì `apply()` tự project state + validate trước khi
+persist. Tests có thể omit harness khi muốn focus vào storage logic.
+
+Đây là kiểu invariant nên live ở **type boundary**, không phải caller code.
+
+### Decision: Async-by-default protocol, sync internal
+
+`WorldModelProtocol` định nghĩa async methods. `InMemoryWorldModel` không
+thực sự cần async (no I/O), nhưng vẫn expose async signature. Lý do:
+khi swap sang Graphiti/Neo4j ở M5, callers KHÔNG cần thay đổi gì. Chi phí:
+`asyncio.Lock` thay vì `threading.Lock`, và tests cần `pytest-asyncio`
+(đã có sẵn từ M0).
+
+### Decision: Resolution không carry winner, chỉ carry decision
+
+Resolution.decision ∈ {APPLY_PROPOSED, KEEP_EXISTING, ESCALATE}. Không
+carry "winner: Episode | WriteProposal" như ban đầu nghĩ.
+
+**Lý do:** caller đã có Conflict object (chứa cả existing + proposed).
+Resolution chỉ cần nói "làm gì" — caller tự pick từ Conflict. Tránh
+duplication và keeps Resolution lean như audit record.
+
+### Decision: NO silent last-write-wins fallback
+
+Đây là quyết định **quan trọng nhất** của M3. Khi rule-based resolver
+không thể quyết với confidence rõ ràng, nó **escalate**, không silently
+default về "newer wins". Lý do:
+
+- Last-write-wins là failure mode that "looks fine in dev, breaks in prod"
+- Toàn bộ project tồn tại để né tránh kiểu coordination failure đó
+- Better fail loudly than fail silently
+
+Quickstart demo show rõ điều này: step 5 escalate, world unchanged.
+Caller (M4) sẽ plug Semantic Arbiter vào đây.
+
+### Decision: 3 rules trong rule-based resolver
+
+| Rule | Trigger | Decision |
+|------|---------|----------|
+| `idempotent_write` | existing.value == proposed.value | APPLY (touch) |
+| `causal_acknowledged` | existing.id ∈ proposed.causal_parents | APPLY (proposer saw & overwrote on purpose) |
+| `dominant_confidence` | abs(delta) ≥ 0.3 | APPLY/KEEP whichever side dominates |
+
+Causal_acknowledged is the **interesting** rule. Nó model "tôi đã đọc
+state cũ, tôi vẫn muốn ghi đè" — agent đã consider thông tin cũ và vẫn
+quyết overwrite. Confidence không matter trong case này. Đây là pattern
+reuse từ MVCC databases.
+
+### Decision: Default `confidence_dominance_delta = 0.3`
+
+Không có lý do principled — chỉ là "rõ ràng hơn noise". 0.1 quá strict
+(confidence noise level), 0.5 quá loose (loại bỏ rất nhiều chính đáng
+escalations). Sẽ tune sau khi có real workload data.
+
+### Lessons learned
+
+1. **Test concurrency cho lock-based code.** 50 racing async writes vào
+   cùng node — test catch ngay nếu ai đó refactor và quên `async with
+   self._lock`. Đặc biệt với in-memory: dễ thấy "không có I/O nên không
+   cần lock", nhưng asyncio task switching vẫn happen ở `await` points.
+
+2. **`isinstance(world, WorldModelProtocol)` runtime check** với
+   `@runtime_checkable` rất giá trị — nếu API drift, test fail ngay với
+   message rõ ràng thay vì AttributeError 5 lớp sâu trong production.
+
+3. **Pydantic frozen models có small gotcha với mypy strict.** `Episode`
+   constructor pass `timestamp=now` (datetime) — nếu `now` annotated là
+   `object`, cần `# type: ignore`. Fix: just type properly từ đầu.
+
+4. **Quickstart demo là tài liệu sống.** Viết demo trước khi M3 release
+   exposed 1 bug thật: ban đầu `_propose()` helper chỉ return outcome,
+   không return reason → demo output không đủ thông tin để debug. Fix
+   bằng cách return tuple. Demo-driven development > docstring-driven.
+
+5. **End-to-end test rất quan trọng** thậm chí khi mỗi component đã có
+   unit test. Integration test catch contract drift giữa Detector ↔
+   Resolver ↔ WorldModel ngay cả khi mỗi cái xanh riêng lẻ.
+
+---
+
 ## Open Research Questions
 
 Những thứ chưa biết câu trả lời, cần research khi build các milestone sau:
