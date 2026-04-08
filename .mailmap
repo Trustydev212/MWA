@@ -1,0 +1,13 @@
+# .mailmap — canonical identities for git log / blame / contributors display.
+#
+# Syntax (see `man gitmailmap`):
+#   Proper Name <proper-email> Commit Name <commit-email>
+#
+# Only the display changes — the underlying commit metadata is untouched.
+# GitHub honours this file for the Contributors graph, commit lists, and
+# `git shortlog` output.  That lets us attribute every commit to a single
+# human without rewriting history or force-pushing.
+
+# The `claude/*` branch workflow authored commits as "Claude <noreply@anthropic.com>".
+# Collapse them under the repo owner's canonical identity.
+Trustydev212 <Trustyboi212@gmail.com> Claude <noreply@anthropic.com>
