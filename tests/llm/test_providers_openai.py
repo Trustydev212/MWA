@@ -241,7 +241,7 @@ async def test_connection_error_is_transient(
 
 
 # ---------------------------------------------------------------------------
-# Structured output via json_schema
+# Structured output — json_schema strategy
 # ---------------------------------------------------------------------------
 
 
@@ -253,6 +253,8 @@ class _Decision(BaseModel):
 async def test_structured_parses_json(
     provider: OpenAIProvider, fake_client: _FakeOpenAIClient
 ) -> None:
+    """Default ``auto`` strategy tries json_schema first.  A conforming
+    response should be returned as-is without triggering the fallback."""
     fake_client.chat.completions.will_return(
         _FakeResponse(
             choices=[
@@ -274,11 +276,150 @@ async def test_structured_parses_json(
     assert call["response_format"]["json_schema"]["strict"] is True
 
 
+async def test_structured_json_schema_strategy_does_not_fallback(
+    fake_client: _FakeOpenAIClient,
+) -> None:
+    """With ``json_schema`` strategy explicit, a bad response raises
+    immediately — no retry with json_object."""
+    strict = OpenAIProvider(
+        model="gpt-test",
+        client=fake_client,  # type: ignore[arg-type]
+        structured_strategy="json_schema",
+    )
+    fake_client.chat.completions.will_return(
+        _FakeResponse(choices=[_FakeChoice(message=_FakeMessage(content='{"nope": true}'))])
+    )
+    with pytest.raises(ResponseSchemaError, match="json_schema mode"):
+        await strict.structured([Message(role=MessageRole.USER, content="x")], _Decision)
+    # Exactly one API call — no retry with the fallback path.
+    assert len(fake_client.chat.completions.create_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Structured output — json_object strategy (portable fallback)
+# ---------------------------------------------------------------------------
+
+
+async def test_structured_json_object_strategy_injects_schema_hint(
+    fake_client: _FakeOpenAIClient,
+) -> None:
+    portable = OpenAIProvider(
+        model="gpt-test",
+        client=fake_client,  # type: ignore[arg-type]
+        structured_strategy="json_object",
+    )
+    fake_client.chat.completions.will_return(
+        _FakeResponse(
+            choices=[
+                _FakeChoice(
+                    message=_FakeMessage(content=json.dumps({"winner": "bob", "confidence": 0.7}))
+                )
+            ]
+        )
+    )
+    result = await portable.structured(
+        [Message(role=MessageRole.USER, content="decide")], _Decision
+    )
+    assert result.winner == "bob"
+
+    call = fake_client.chat.completions.create_calls[0]
+    assert call["response_format"] == {"type": "json_object"}
+    # Schema hint must be appended as the last system message
+    last_msg = call["messages"][-1]
+    assert last_msg["role"] == "system"
+    assert "JSON schema" in last_msg["content"]
+    assert "_Decision" in last_msg["content"] or "winner" in last_msg["content"]
+
+
+# ---------------------------------------------------------------------------
+# Structured output — auto strategy (tries schema, falls back on failure)
+# ---------------------------------------------------------------------------
+
+
+async def test_structured_auto_falls_back_on_schema_mismatch(
+    fake_client: _FakeOpenAIClient,
+) -> None:
+    """When json_schema mode returns schema-mismatched JSON (futrixapi
+    behaviour), auto strategy should retry once with json_object and
+    return the second response."""
+    auto = OpenAIProvider(
+        model="gpt-test",
+        client=fake_client,  # type: ignore[arg-type]
+        structured_strategy="auto",
+    )
+    # First call: json_schema returns junk that doesn't match _Decision.
+    # Second call: json_object returns valid JSON.
+    fake_client.chat.completions.will_return(
+        _FakeResponse(
+            choices=[
+                _FakeChoice(
+                    message=_FakeMessage(
+                        content=json.dumps({"arbiter": "Futrix", "confidence_gap": 0.05})
+                    )
+                )
+            ]
+        )
+    )
+    # _FakeCompletions only stores one _next at a time — we need a queue.
+    # Easiest: monkey-patch the create() method with a counter-driven one.
+
+    call_count = {"n": 0}
+
+    async def create_multi(**kwargs: Any) -> _FakeResponse:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            # First call: schema-mismatched JSON
+            return _FakeResponse(
+                choices=[
+                    _FakeChoice(
+                        message=_FakeMessage(
+                            content=json.dumps({"arbiter": "Futrix", "confidence_gap": 0.05})
+                        )
+                    )
+                ]
+            )
+        # Second call: valid JSON
+        return _FakeResponse(
+            choices=[
+                _FakeChoice(
+                    message=_FakeMessage(
+                        content=json.dumps({"winner": "alice", "confidence": 0.88})
+                    )
+                )
+            ]
+        )
+
+    fake_client.chat.completions.create = create_multi  # type: ignore[method-assign]
+
+    result = await auto.structured([Message(role=MessageRole.USER, content="decide")], _Decision)
+    assert result.winner == "alice"
+    assert result.confidence == 0.88
+    assert call_count["n"] == 2
+
+    # After the latch, a second structured() call should skip json_schema
+    # entirely — only one more API call.
+    call_count_after_latch = call_count["n"]
+    await auto.structured([Message(role=MessageRole.USER, content="decide again")], _Decision)
+    assert call_count["n"] == call_count_after_latch + 1  # exactly one more call
+
+
 async def test_structured_rejects_invalid_json(
     provider: OpenAIProvider, fake_client: _FakeOpenAIClient
 ) -> None:
-    fake_client.chat.completions.will_return(
-        _FakeResponse(choices=[_FakeChoice(message=_FakeMessage(content="not json at all"))])
-    )
+    """Even auto strategy gives up after the fallback also fails."""
+    # First call (json_schema): not even valid JSON → ResponseSchemaError
+    # Second call (json_object fallback): also garbage → ResponseSchemaError raised to caller
+    call_count = {"n": 0}
+
+    async def create_broken(**kwargs: Any) -> _FakeResponse:
+        call_count["n"] += 1
+        return _FakeResponse(
+            choices=[_FakeChoice(message=_FakeMessage(content="not json at all"))]
+        )
+
+    fake_client.chat.completions.create = create_broken  # type: ignore[method-assign]
+
     with pytest.raises(ResponseSchemaError):
         await provider.structured([Message(role=MessageRole.USER, content="decide")], _Decision)
+    # auto strategy → tried json_schema then json_object, both failed → 2 calls
+    assert call_count["n"] == 2
