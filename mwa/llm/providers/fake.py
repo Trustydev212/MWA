@@ -1,6 +1,6 @@
-"""In-memory fake provider — the workhorse of SOMA's LLM test suite.
+"""In-memory fake provider — the workhorse of MWA's LLM test suite.
 
-:class:`FakeProvider` implements :class:`~soma.llm.base.LLMProvider`
+:class:`FakeProvider` implements :class:`~mwa.llm.base.LLMProvider`
 without ever making a network call.  Tests configure it by stacking
 canned responses or an error queue; the provider pops one entry per
 call.  That gives deterministic, fast, offline tests for every layer
@@ -9,9 +9,9 @@ Agent SDK — without any of them ever touching a real LLM.
 
 Two consumers are expected:
 
-1. **SOMA's own tests** (``tests/llm/``, ``tests/arbiter/``, ...).
+1. **MWA's own tests** (``tests/llm/``, ``tests/arbiter/``, ...).
 2. **User projects** that want to unit-test their agents without
-   burning tokens.  That's why this lives under ``soma.llm.providers``
+   burning tokens.  That's why this lives under ``mwa.llm.providers``
    instead of ``tests/`` — it's part of the public API.
 """
 
@@ -25,7 +25,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from soma.llm.base import (
+from mwa.llm.base import (
     ChatChunk,
     ChatOptions,
     ChatResponse,
@@ -38,7 +38,7 @@ T_Schema = TypeVar("T_Schema", bound=BaseModel)
 
 
 class FakeProvider:
-    """Queue-driven fake implementing :class:`~soma.llm.base.LLMProvider`.
+    """Queue-driven fake implementing :class:`~mwa.llm.base.LLMProvider`.
 
     Parameters
     ----------

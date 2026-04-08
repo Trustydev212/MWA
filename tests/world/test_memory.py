@@ -6,10 +6,10 @@ import asyncio
 
 import pytest
 
-from soma.errors import HardConstraintViolation, WorldModelError
-from soma.harness import HarnessMap
-from soma.types import WriteProposal
-from soma.world import InMemoryWorldModel, WorldModelProtocol
+from mwa.errors import HardConstraintViolation, WorldModelError
+from mwa.harness import HarnessMap
+from mwa.types import WriteProposal
+from mwa.world import InMemoryWorldModel, WorldModelProtocol
 
 
 @pytest.fixture

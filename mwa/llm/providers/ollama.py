@@ -9,7 +9,7 @@ set of local tools (Llama.cpp, LM Studio, LocalAI, etc. in Ollama mode).
 
 Install with::
 
-    uv pip install soma[ollama]
+    uv pip install mwa[ollama]
 
 Structured output uses Ollama's ``format=json`` mode plus a schema
 injection in the system prompt.  Ollama doesn't natively enforce
@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from soma.llm.base import (
+from mwa.llm.base import (
     ChatChunk,
     ChatOptions,
     ChatResponse,
@@ -65,7 +65,7 @@ class OllamaProvider:
             except ImportError as exc:
                 raise PermanentProviderError(
                     "OllamaProvider requires the `httpx` package. "
-                    "Install with: `uv pip install soma[ollama]`"
+                    "Install with: `uv pip install mwa[ollama]`"
                 ) from exc
             self._client = httpx.AsyncClient(timeout=timeout)
 
@@ -209,7 +209,7 @@ class OllamaProvider:
         # httpx.HTTPStatusError carries the response
         status = getattr(getattr(exc, "response", None), "status_code", None)
         if status == 429:
-            from soma.llm.base import RateLimitError
+            from mwa.llm.base import RateLimitError
 
             return RateLimitError(msg)
         if status is not None and 500 <= status < 600:

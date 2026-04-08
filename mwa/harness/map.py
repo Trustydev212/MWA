@@ -25,10 +25,10 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from soma.errors import HarnessMapError
-from soma.harness.constraints import ConstraintViolation, HardConstraintEvaluator
-from soma.harness.schema import HarnessNodeSchema, HarnessSchema
-from soma.types import Impact
+from mwa.errors import HarnessMapError
+from mwa.harness.constraints import ConstraintViolation, HardConstraintEvaluator
+from mwa.harness.schema import HarnessNodeSchema, HarnessSchema
+from mwa.types import Impact
 
 
 class HarnessMap:

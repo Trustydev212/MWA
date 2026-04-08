@@ -4,7 +4,7 @@ Run with:
 
     uv run python examples/quickstart/two_agents.py
 
-This is the smallest non-trivial demonstration of SOMA's value
+This is the smallest non-trivial demonstration of MWA's value
 proposition.  Two "agents" (just async functions here — no LLM, no
 network) write into a shared World Model.  Some writes go in cleanly,
 some create conflicts that the rule-based resolver handles, and one is
@@ -25,10 +25,10 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from soma.arbiter import ConflictDetector, ResolutionDecision, RuleBasedResolver
-from soma.harness import HarnessMap
-from soma.types import WriteProposal
-from soma.world import InMemoryWorldModel
+from mwa.arbiter import ConflictDetector, ResolutionDecision, RuleBasedResolver
+from mwa.harness import HarnessMap
+from mwa.types import WriteProposal
+from mwa.world import InMemoryWorldModel
 
 HARNESS_PATH = Path(__file__).resolve().parents[2] / "harness_maps" / "video_production.json"
 

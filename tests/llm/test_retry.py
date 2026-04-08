@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from soma.errors import LLMProviderError
-from soma.llm import (
+from mwa.errors import LLMProviderError
+from mwa.llm import (
     PermanentProviderError,
     RateLimitError,
     RetryPolicy,

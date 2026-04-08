@@ -1,6 +1,6 @@
 """End-to-end: write protocol with conflict detection + rule-based resolution.
 
-This is the smallest "real" pipeline SOMA can run before the LLM Arbiter
+This is the smallest "real" pipeline MWA can run before the LLM Arbiter
 exists.  If this test ever breaks, it means the contracts between the
 World Model, Detector, and Resolver have drifted apart and need to be
 re-aligned before any higher-level work proceeds.
@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import pytest
 
-from soma.arbiter import ConflictDetector, ResolutionDecision, RuleBasedResolver
-from soma.harness import HarnessMap
-from soma.types import WriteProposal
-from soma.world import InMemoryWorldModel
+from mwa.arbiter import ConflictDetector, ResolutionDecision, RuleBasedResolver
+from mwa.harness import HarnessMap
+from mwa.types import WriteProposal
+from mwa.world import InMemoryWorldModel
 
 
 @pytest.fixture

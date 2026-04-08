@@ -1,25 +1,25 @@
 """Standalone live probe for any OpenAI-compatible endpoint.
 
 Run this outside the Claude sandbox (Colab, local machine, anywhere with
-working outbound HTTPS) to verify that SOMA's ``OpenAIProvider`` adapter
+working outbound HTTPS) to verify that MWA's ``OpenAIProvider`` adapter
 talks to a given endpoint correctly::
 
-    SOMA_LIVE_API_KEY="sk-..." \\
-    SOMA_LIVE_BASE_URL="https://futrixapi.com/v1" \\
-    SOMA_LIVE_MODEL="auto" \\
+    MWA_LIVE_API_KEY="sk-..." \\
+    MWA_LIVE_BASE_URL="https://futrixapi.com/v1" \\
+    MWA_LIVE_MODEL="auto" \\
     python scripts/probe_live_llm.py
 
 Or drop the whole file into a Google Colab cell after installing the
 package::
 
     !pip install -q openai pydantic
-    !pip install -q -e /content/SOMA
+    !pip install -q -e /content/MWA
 
     import os
-    os.environ["SOMA_LIVE_API_KEY"]  = "sk-..."
-    os.environ["SOMA_LIVE_BASE_URL"] = "https://futrixapi.com/v1"
-    os.environ["SOMA_LIVE_MODEL"]    = "auto"
-    %run /content/SOMA/scripts/probe_live_llm.py
+    os.environ["MWA_LIVE_API_KEY"]  = "sk-..."
+    os.environ["MWA_LIVE_BASE_URL"] = "https://futrixapi.com/v1"
+    os.environ["MWA_LIVE_MODEL"]    = "auto"
+    %run /content/MWA/scripts/probe_live_llm.py
 
 The script:
 1. Performs a minimal chat() round-trip and prints the response preview.
@@ -39,7 +39,7 @@ import traceback
 
 from pydantic import BaseModel, Field
 
-REQUIRED_ENV = ("SOMA_LIVE_API_KEY", "SOMA_LIVE_BASE_URL", "SOMA_LIVE_MODEL")
+REQUIRED_ENV = ("MWA_LIVE_API_KEY", "MWA_LIVE_BASE_URL", "MWA_LIVE_MODEL")
 
 
 def _masked(value: str) -> str:
@@ -70,19 +70,19 @@ class _TinyDecision(BaseModel):
 
 async def _run() -> None:
     env = _check_env()
-    print(f"[probe] base_url = {env['SOMA_LIVE_BASE_URL']}")
-    print(f"[probe] model    = {env['SOMA_LIVE_MODEL']}")
-    print(f"[probe] api_key  = {_masked(env['SOMA_LIVE_API_KEY'])}")
+    print(f"[probe] base_url = {env['MWA_LIVE_BASE_URL']}")
+    print(f"[probe] model    = {env['MWA_LIVE_MODEL']}")
+    print(f"[probe] api_key  = {_masked(env['MWA_LIVE_API_KEY'])}")
     print()
 
     # Lazy imports so "missing env" error fires before anything else.
-    from soma.llm.base import ChatOptions, Message, MessageRole
-    from soma.llm.providers import OpenAIProvider
+    from mwa.llm.base import ChatOptions, Message, MessageRole
+    from mwa.llm.providers import OpenAIProvider
 
     provider = OpenAIProvider(
-        model=env["SOMA_LIVE_MODEL"],
-        api_key=env["SOMA_LIVE_API_KEY"],
-        base_url=env["SOMA_LIVE_BASE_URL"],
+        model=env["MWA_LIVE_MODEL"],
+        api_key=env["MWA_LIVE_API_KEY"],
+        base_url=env["MWA_LIVE_BASE_URL"],
     )
 
     # ------------------------------------------------------------------
@@ -97,7 +97,7 @@ async def _run() -> None:
             ),
             Message(
                 role=MessageRole.USER,
-                content="Say hello from SOMA and name one thing you could be.",
+                content="Say hello from MWA and name one thing you could be.",
             ),
         ],
         options=ChatOptions(temperature=0.0, max_tokens=64),
@@ -143,11 +143,11 @@ async def _run() -> None:
     except Exception as exc:
         print(f"    ✗ structured() raised: {type(exc).__name__}: {exc}")
         print(
-            "    (this is a real interop finding, not a SOMA bug — some gateways "
+            "    (this is a real interop finding, not a MWA bug — some gateways "
             "don't implement response_format=json_schema strictly)"
         )
         # Non-fatal: the chat() probe is the blocker.  Structured output
-        # failing is useful data for the SOMA RESEARCH notes.
+        # failing is useful data for the MWA RESEARCH notes.
 
     print()
     print("[probe] done.")

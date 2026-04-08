@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from soma.llm import PricingEntry, PricingTable, Usage, calculate_cost
+from mwa.llm import PricingEntry, PricingTable, Usage, calculate_cost
 
 
 def test_pricing_entry_zero_usage_is_zero() -> None:

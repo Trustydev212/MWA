@@ -5,9 +5,9 @@ They are marked ``integration`` and **skipped by default** — pytest will
 only run them when you explicitly invoke the ``integration`` marker AND
 the required environment variables are present::
 
-    export SOMA_LIVE_API_KEY="sk-..."
-    export SOMA_LIVE_BASE_URL="https://futrixapi.com/v1"  # or https://api.openai.com/v1
-    export SOMA_LIVE_MODEL="auto"                        # or "gpt-4o-mini"
+    export MWA_LIVE_API_KEY="sk-..."
+    export MWA_LIVE_BASE_URL="https://futrixapi.com/v1"  # or https://api.openai.com/v1
+    export MWA_LIVE_MODEL="auto"                        # or "gpt-4o-mini"
 
     uv run pytest -m integration tests/llm/test_live_openai_compat.py -v
 
@@ -37,15 +37,15 @@ import os
 import pytest
 from pydantic import BaseModel, Field
 
-from soma.llm.base import ChatOptions, Message, MessageRole
-from soma.llm.providers import FakeProvider, OpenAIProvider
-from soma.llm.retry import RetryPolicy
-from soma.llm.router import LLMRouter
+from mwa.llm.base import ChatOptions, Message, MessageRole
+from mwa.llm.providers import FakeProvider, OpenAIProvider
+from mwa.llm.retry import RetryPolicy
+from mwa.llm.router import LLMRouter
 
 LIVE_ENV = {
-    "api_key": "SOMA_LIVE_API_KEY",
-    "base_url": "SOMA_LIVE_BASE_URL",
-    "model": "SOMA_LIVE_MODEL",
+    "api_key": "MWA_LIVE_API_KEY",
+    "base_url": "MWA_LIVE_BASE_URL",
+    "model": "MWA_LIVE_MODEL",
 }
 
 
@@ -96,7 +96,7 @@ async def test_live_chat_returns_non_empty_response(provider: OpenAIProvider) ->
                 role=MessageRole.SYSTEM,
                 content="You are a terse assistant. Answer in 8 words or fewer.",
             ),
-            Message(role=MessageRole.USER, content="Say hello from SOMA."),
+            Message(role=MessageRole.USER, content="Say hello from MWA."),
         ],
         options=ChatOptions(temperature=0.0, max_tokens=64),
     )
@@ -125,14 +125,14 @@ async def test_live_structured_output(provider: OpenAIProvider) -> None:
     Some OpenAI-compatible gateways don't implement ``response_format``
     strictly.  If this test fails with ``ResponseSchemaError`` on a
     gateway like LiteLLM / OpenRouter / etc., it's a real interop
-    finding we want to surface, not a SOMA bug.
+    finding we want to surface, not a MWA bug.
     """
     decision = await provider.structured(
         [
             Message(
                 role=MessageRole.SYSTEM,
                 content=(
-                    "You are the SOMA Semantic Arbiter. Given a fake conflict, "
+                    "You are the MWA Semantic Arbiter. Given a fake conflict, "
                     "return a structured decision."
                 ),
             ),

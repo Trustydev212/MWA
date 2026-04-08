@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel
 
-from soma.llm import (
+from mwa.llm import (
     ChatOptions,
     LLMProvider,
     Message,
@@ -13,7 +13,7 @@ from soma.llm import (
     ResponseSchemaError,
     TransientProviderError,
 )
-from soma.llm.providers import FakeProvider
+from mwa.llm.providers import FakeProvider
 
 
 class _Decision(BaseModel):

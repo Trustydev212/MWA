@@ -22,10 +22,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from soma.types import Conflict, WriteProposal
+from mwa.types import Conflict, WriteProposal
 
 if TYPE_CHECKING:
-    from soma.world import WorldModelProtocol
+    from mwa.world import WorldModelProtocol
 
 
 class ConflictDetector:

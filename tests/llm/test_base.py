@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from soma.errors import LLMProviderError, SomaError
-from soma.llm import (
+from mwa.errors import LLMProviderError, MWAError
+from mwa.llm import (
     ChatOptions,
     ChatResponse,
     Message,
@@ -19,7 +19,7 @@ from soma.llm import (
 )
 
 
-def test_error_hierarchy_rooted_at_soma_error() -> None:
+def test_error_hierarchy_rooted_at_mwa_error() -> None:
     for cls in (
         RateLimitError,
         TransientProviderError,
@@ -27,7 +27,7 @@ def test_error_hierarchy_rooted_at_soma_error() -> None:
         ResponseSchemaError,
     ):
         assert issubclass(cls, LLMProviderError)
-        assert issubclass(cls, SomaError)
+        assert issubclass(cls, MWAError)
 
 
 def test_message_role_values_are_stable() -> None:
