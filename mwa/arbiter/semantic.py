@@ -52,7 +52,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from mwa.arbiter.resolution import Resolution, ResolutionDecision
-from mwa.llm.base import Message, MessageRole
+from mwa.llm.base import ChatOptions, Message, MessageRole
 from mwa.types import Conflict
 
 if TYPE_CHECKING:
@@ -134,6 +134,13 @@ class SemanticArbiter:
         How many hops of downstream context to include in the prompt.
         Too shallow and the LLM misses impact; too deep and the prompt
         balloons.  Default 2 is enough for realistic harness maps.
+    max_output_tokens:
+        Upper bound on the LLM's reply length.  ``ArbiterDecision`` is
+        a nested schema with 9 required fields plus an update_plan
+        array, so we default to 2048 (well above the ~400 token typical
+        serialised output) to keep weak-model routing from truncating
+        mid-JSON.  Tightening this risks truncated responses → schema
+        parse failures.
     """
 
     def __init__(
@@ -143,16 +150,20 @@ class SemanticArbiter:
         *,
         auto_resolve_threshold: float = 0.85,
         subgraph_depth: int = 2,
+        max_output_tokens: int = 2048,
     ) -> None:
         if not 0.0 <= auto_resolve_threshold <= 1.0:
             raise ValueError("auto_resolve_threshold must be in [0, 1]")
         if subgraph_depth < 0:
             raise ValueError("subgraph_depth must be >= 0")
+        if max_output_tokens < 1:
+            raise ValueError("max_output_tokens must be >= 1")
 
         self._provider = provider
         self._harness = harness
         self._auto_resolve_threshold = auto_resolve_threshold
         self._subgraph_depth = subgraph_depth
+        self._max_output_tokens = max_output_tokens
 
     # ------------------------------------------------------------------
     # Public API
@@ -167,8 +178,11 @@ class SemanticArbiter:
         propagates — callers with a retry policy wrap this.
         """
         messages = self._build_prompt(conflict)
+        # temperature=0 for determinism, max_tokens set high so ArbiterDecision
+        # never gets truncated on a slow/verbose model.
+        options = ChatOptions(temperature=0.0, max_tokens=self._max_output_tokens)
         decision: ArbiterDecision = await self._provider.structured(
-            messages, ArbiterDecision
+            messages, ArbiterDecision, options=options
         )
         return self._decision_to_resolution(decision)
 

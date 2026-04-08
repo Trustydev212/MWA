@@ -51,7 +51,12 @@ jobs:
   smoke:
     name: Run live integration tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Bumped from 10 to 20 — the SemanticArbiter live tests each do 2 API
+    # round-trips (json_schema first, json_object fallback) against a routed
+    # gateway whose "auto" model can be any speed.  On a slow routing hit
+    # we've seen the suite brush against the 10-minute ceiling, so give it
+    # headroom.  Individual tests still fail fast on real errors.
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -151,7 +156,11 @@ jobs:
           MWA_LIVE_BASE_URL: ${{ secrets.MWA_LIVE_BASE_URL }}
           MWA_LIVE_MODEL: ${{ secrets.MWA_LIVE_MODEL }}
         run: |
+          # --tb=long so ResponseSchemaError messages (which include the
+          # raw LLM content preview) survive the CI log; --showlocals so
+          # we see the failing variable values.  Verbose because live
+          # tests are few and we want every signal when one fails.
           uv run pytest -m integration \
             tests/llm/test_live_openai_compat.py \
             tests/arbiter/test_semantic_live.py \
-            -v --tb=short
+            -v --tb=long --showlocals
