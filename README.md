@@ -260,12 +260,19 @@ class TargetedPush:
 
 ```python
 from mwa import WorldAgent, connect
+from mwa.llm import LLMProvider
 
 # Kết nối vào MWA Runtime
+# LLM provider là pluggable — Claude, OpenAI, Gemini, Mistral,
+# Groq, DeepSeek, Ollama, vLLM, bất kỳ provider nào tương thích
 agent = WorldAgent(
     name="script_writer",
     harness_map="./harness.map.json",
-    llm_api_key="..."
+    llm=LLMProvider.from_config({
+        "provider": "anthropic",         # hoặc "openai" / "gemini" / "mistral" / "groq" / "ollama" / "vllm" / ...
+        "model": "claude-opus-4-6",
+        "api_key_env": "ANTHROPIC_API_KEY"
+    })
 )
 
 # Đọc từ World Model (Graph RAG — không scan full DB)
@@ -372,13 +379,77 @@ MWA (this project):
 Core Graph Engine:    Graphiti (fork & extend)
 Graph Database:       Neo4j (default) / FalkorDB (faster) / Memgraph (WebSocket native)
 Realtime:             WebSocket (native Python / Socket.io)
-Arbiter LLM:          Claude API (Anthropic) / OpenAI / bất kỳ LLM nào
+Arbiter LLM:          Multi-provider (provider-agnostic) — xem bảng bên dưới
 Language:             Python 3.11+
 Package Manager:      uv
 Testing:              pytest + pytest-asyncio
 Observability:        OpenTelemetry
 Distribution:         PyPI package + MCP server + Docker Compose
 ```
+
+### LLM Provider Support
+
+MWA **không lock vào một provider nào**. Semantic Arbiter, agent inference,
+và bất kỳ LLM call nào trong runtime đều đi qua một `LLMProvider` interface
+thống nhất — bạn plug provider nào cũng chạy được.
+
+```
+Closed-source API:
+  ✓ Anthropic      (Claude 3/4/4.5/4.6 family)
+  ✓ OpenAI         (GPT-4/4o/5, o-series reasoning)
+  ✓ Google         (Gemini 1.5/2.0/2.5 Pro & Flash)
+  ✓ xAI            (Grok family)
+  ✓ Mistral        (Mistral Large, Codestral)
+  ✓ Cohere         (Command R+)
+  ✓ DeepSeek       (DeepSeek-V3, R1)
+
+Aggregators / gateways:
+  ✓ OpenRouter     (300+ models qua một API)
+  ✓ Groq           (LPU inference — ultra low latency)
+  ✓ Together AI
+  ✓ Fireworks AI
+  ✓ Perplexity
+  ✓ LiteLLM        (universal proxy — bất kỳ provider nào)
+
+Self-hosted / local:
+  ✓ Ollama         (local models — Llama, Qwen, Mistral, …)
+  ✓ vLLM           (production GPU serving)
+  ✓ TGI            (HuggingFace Text Generation Inference)
+  ✓ llama.cpp      (qua OpenAI-compatible endpoint)
+  ✓ LM Studio      (desktop local inference)
+
+Custom:
+  ✓ Bất kỳ endpoint nào implement `LLMProvider` protocol
+    (streaming, structured output, tool calling)
+```
+
+**Ví dụ cấu hình multi-provider:**
+
+```python
+from mwa.llm import LLMProvider
+
+# Claude cho Arbiter (reasoning tốt nhất)
+arbiter_llm = LLMProvider.anthropic(model="claude-opus-4-6")
+
+# GPT-4o cho một agent
+writer_llm = LLMProvider.openai(model="gpt-4o")
+
+# Gemini Flash cho agent khác (rẻ, nhanh)
+visual_llm = LLMProvider.gemini(model="gemini-2.5-flash")
+
+# Local Llama qua Ollama (free, offline)
+caption_llm = LLMProvider.ollama(model="llama3.3:70b", base_url="http://localhost:11434")
+
+# OpenRouter — một key, 300+ models
+any_llm = LLMProvider.openrouter(model="deepseek/deepseek-r1", api_key_env="OPENROUTER_KEY")
+
+# LiteLLM proxy — route dynamic giữa providers
+proxy_llm = LLMProvider.litellm(base_url="http://localhost:4000", model="claude-opus-4-6")
+```
+
+**Mỗi agent có thể dùng một provider khác nhau.** Arbiter có thể là Claude,
+script_writer có thể là GPT-4o, visual_planner có thể là local Llama —
+tất cả cùng share một World Model.
 
 ---
 
@@ -407,6 +478,33 @@ mwa/
 │   │   ├── arbiter.py           ← Semantic Arbiter LLM
 │   │   ├── scoring.py           ← Scoring functions
 │   │   └── resolution.py        ← Winner/Loser protocol
+│   │
+│   ├── llm/                     ← Provider-agnostic LLM layer
+│   │   ├── base.py              ← LLMProvider protocol (chat, stream, structured)
+│   │   ├── registry.py          ← Provider registry + factory (.from_config)
+│   │   ├── router.py            ← Multi-provider routing + fallback chain
+│   │   ├── retry.py             ← Retry, rate limit, circuit breaker
+│   │   ├── cost.py              ← Token counting + cost tracking
+│   │   └── providers/
+│   │       ├── anthropic.py     ← Claude (3/4/4.5/4.6)
+│   │       ├── openai.py        ← GPT-4/4o/5, o-series
+│   │       ├── gemini.py        ← Google Gemini
+│   │       ├── xai.py           ← Grok
+│   │       ├── mistral.py       ← Mistral / Codestral
+│   │       ├── cohere.py        ← Command R+
+│   │       ├── deepseek.py      ← DeepSeek-V3 / R1
+│   │       ├── openrouter.py    ← OpenRouter (300+ models)
+│   │       ├── groq.py          ← Groq LPU
+│   │       ├── together.py      ← Together AI
+│   │       ├── fireworks.py     ← Fireworks AI
+│   │       ├── perplexity.py    ← Perplexity
+│   │       ├── litellm.py       ← LiteLLM proxy adapter
+│   │       ├── ollama.py        ← Local Ollama
+│   │       ├── vllm.py          ← vLLM serving
+│   │       ├── tgi.py           ← HF TGI
+│   │       ├── llamacpp.py      ← llama.cpp server
+│   │       ├── lmstudio.py      ← LM Studio local
+│   │       └── openai_compat.py ← Generic OpenAI-compatible endpoint
 │   │
 │   ├── transport/
 │   │   ├── websocket.py         ← WebSocket hub
@@ -491,14 +589,15 @@ cp harness_maps/video_production.json ./my_harness.map.json
 ### 4. Build agents đầu tiên
 
 ```python
-# agent_a.py — Script Writer
+# agent_a.py — Script Writer (dùng OpenAI GPT-4o)
 from mwa import WorldAgent
+from mwa.llm import LLMProvider
 
 agent = WorldAgent(
     name="script_writer",
     harness_map="./my_harness.map.json",
     mwa_url="ws://localhost:8765",
-    llm_api_key="your_anthropic_key"
+    llm=LLMProvider.openai(model="gpt-4o")  # đọc OPENAI_API_KEY từ env
 )
 
 @agent.on_world_update("campaign_goal")
@@ -510,14 +609,15 @@ await agent.start()
 ```
 
 ```python
-# agent_b.py — Visual Planner
+# agent_b.py — Visual Planner (dùng local Llama qua Ollama)
 from mwa import WorldAgent
+from mwa.llm import LLMProvider
 
 agent = WorldAgent(
     name="visual_planner",
     harness_map="./my_harness.map.json",
     mwa_url="ws://localhost:8765",
-    llm_api_key="your_anthropic_key"
+    llm=LLMProvider.ollama(model="llama3.3:70b")
 )
 
 @agent.on_world_update("tone")
@@ -527,6 +627,10 @@ async def on_tone_change(new_value, context):
 
 await agent.start()
 ```
+
+> Hai agents trên dùng **hai provider hoàn toàn khác nhau** (OpenAI cloud +
+> local Ollama) nhưng vẫn cùng share một World Model. Arbiter có thể dùng
+> provider thứ ba (vd. Claude). MWA không quan tâm — provider là pluggable.
 
 ```bash
 # Chạy cả hai agents đồng thời

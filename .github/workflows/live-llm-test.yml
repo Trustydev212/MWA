@@ -1,0 +1,124 @@
+name: Live LLM smoke test
+
+# Runs the opt-in integration tests from tests/llm/test_live_openai_compat.py
+# against any OpenAI-compatible endpoint using secrets configured in the repo.
+#
+# Why this workflow exists
+# ------------------------
+# The Claude Code sandbox has an egress allowlist that blocks arbitrary
+# third-party API hosts (e.g. futrixapi.com). GitHub-hosted runners have
+# no such restriction, so they are the most convenient place to verify a
+# provider-specific setup without a local dev machine.
+#
+# How to use
+# ----------
+# 1. In the repo UI, add three Actions *secrets* (Settings → Secrets and
+#    variables → Actions → New repository secret):
+#
+#        SOMA_LIVE_API_KEY    - the provider bearer token (e.g. sk-futrix-...)
+#        SOMA_LIVE_BASE_URL   - e.g. https://futrixapi.com/v1
+#        SOMA_LIVE_MODEL      - e.g. auto  (or gpt-4o-mini, claude-opus-4-6, etc.)
+#
+# 2. Go to Actions → "Live LLM smoke test" → "Run workflow".
+# 3. Watch the log for the structured chat response preview and usage counts.
+#
+# Secrets are encrypted at rest, masked in logs, and never written to disk
+# beyond the process environment of the pytest run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      verbose:
+        description: "Also print a raw probe hit before pytest"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-llm-test
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Run live integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        run: python -m pip install --upgrade pip uv
+
+      - name: Install SOMA + openai extras
+        run: uv pip install --system -e ".[openai,dev]"
+
+      - name: Sanity-check secrets are set
+        env:
+          SOMA_LIVE_API_KEY: ${{ secrets.SOMA_LIVE_API_KEY }}
+          SOMA_LIVE_BASE_URL: ${{ secrets.SOMA_LIVE_BASE_URL }}
+          SOMA_LIVE_MODEL: ${{ secrets.SOMA_LIVE_MODEL }}
+        run: |
+          missing=0
+          for var in SOMA_LIVE_API_KEY SOMA_LIVE_BASE_URL SOMA_LIVE_MODEL; do
+            if [ -z "${!var}" ]; then
+              echo "::error::Missing secret $var — add it in Settings → Secrets and variables → Actions"
+              missing=1
+            else
+              echo "  $var is set"
+            fi
+          done
+          if [ $missing -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Raw probe (diagnostic)
+        if: ${{ inputs.verbose }}
+        env:
+          SOMA_LIVE_API_KEY: ${{ secrets.SOMA_LIVE_API_KEY }}
+          SOMA_LIVE_BASE_URL: ${{ secrets.SOMA_LIVE_BASE_URL }}
+          SOMA_LIVE_MODEL: ${{ secrets.SOMA_LIVE_MODEL }}
+        run: |
+          python - <<'PY'
+          import asyncio, os, json
+          from soma.llm.base import ChatOptions, Message, MessageRole
+          from soma.llm.providers import OpenAIProvider
+
+          async def main() -> None:
+              provider = OpenAIProvider(
+                  model=os.environ["SOMA_LIVE_MODEL"],
+                  api_key=os.environ["SOMA_LIVE_API_KEY"],
+                  base_url=os.environ["SOMA_LIVE_BASE_URL"],
+              )
+              print(f"[probe] provider.name={provider.name}  model={provider.model}")
+              response = await provider.chat(
+                  [
+                      Message(role=MessageRole.SYSTEM, content="You reply in under 12 words."),
+                      Message(role=MessageRole.USER, content="Say hello from SOMA and name one model you could be."),
+                  ],
+                  options=ChatOptions(temperature=0.0, max_tokens=64),
+              )
+              print("-" * 60)
+              print(f"content      : {response.content!r}")
+              print(f"model (echo) : {response.model}")
+              print(f"provider     : {response.provider}")
+              print(f"usage        : in={response.usage.input_tokens} out={response.usage.output_tokens}")
+              print(f"finish_reason: {response.finish_reason}")
+
+          asyncio.run(main())
+          PY
+
+      - name: Run pytest integration suite
+        env:
+          SOMA_LIVE_API_KEY: ${{ secrets.SOMA_LIVE_API_KEY }}
+          SOMA_LIVE_BASE_URL: ${{ secrets.SOMA_LIVE_BASE_URL }}
+          SOMA_LIVE_MODEL: ${{ secrets.SOMA_LIVE_MODEL }}
+        run: |
+          uv run pytest -m integration tests/llm/test_live_openai_compat.py -v --tb=short
