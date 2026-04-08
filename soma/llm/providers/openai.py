@@ -83,9 +83,13 @@ class OpenAIProvider:
         opts = options or ChatOptions()
 
         try:
+            # The openai SDK types messages as strict TypedDicts; SOMA's
+            # neutral Message format intentionally stays simpler, so we
+            # silence the messages arg-type check.  Wire format is still
+            # exactly what the SDK expects.
             raw = await self._client.chat.completions.create(
                 model=self._model,
-                messages=api_messages,
+                messages=api_messages,  # type: ignore[arg-type]
                 temperature=opts.temperature,
                 max_tokens=opts.max_tokens,
                 top_p=opts.top_p,
@@ -106,16 +110,18 @@ class OpenAIProvider:
         opts = options or ChatOptions()
 
         try:
+            # stream=True picks the AsyncStream overload; messages silenced
+            # for the same reason as chat().
             stream = await self._client.chat.completions.create(
                 model=self._model,
-                messages=api_messages,
+                messages=api_messages,  # type: ignore[arg-type]
                 temperature=opts.temperature,
                 max_tokens=opts.max_tokens,
                 top_p=opts.top_p,
                 stop=list(opts.stop) or None,
                 stream=True,
             )
-            async for event in stream:
+            async for event in stream:  # type: ignore[union-attr]
                 choice = event.choices[0] if event.choices else None
                 if choice is None:
                     continue
@@ -147,7 +153,11 @@ class OpenAIProvider:
         }
 
         try:
-            raw = await self._client.chat.completions.create(
+            # response_format is a hand-built dict rather than the SDK's
+            # strict TypedDict; messages silenced for the same reason as
+            # chat().  Together this confuses overload resolution so we
+            # silence the whole call-overload selection here.
+            raw = await self._client.chat.completions.create(  # type: ignore[call-overload]
                 model=self._model,
                 messages=api_messages,
                 temperature=opts.temperature,
