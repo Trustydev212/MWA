@@ -24,8 +24,8 @@ the whole project is trying to avoid.
 
 from __future__ import annotations
 
-from soma.arbiter.resolution import Resolution, ResolutionDecision
-from soma.types import Conflict
+from mwa.arbiter.resolution import Resolution, ResolutionDecision
+from mwa.types import Conflict
 
 
 class RuleBasedResolver:

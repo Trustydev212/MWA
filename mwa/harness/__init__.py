@@ -2,7 +2,7 @@
 
 The Harness Map is the *constitution* of the World Model.  It is defined
 once by the architect (in ``harness.map.json``) and never changes at
-runtime.  Every other layer in SOMA reads from it:
+runtime.  Every other layer in MWA reads from it:
 
 - the World Model uses it to know which nodes are downstream of a write
 - the Conflict Detector uses it to enforce hard constraints before any DB write
@@ -14,13 +14,13 @@ single arbitration would need to re-discover topology — which is exactly
 the O(n) cost we are trying to avoid.
 """
 
-from soma.harness.constraints import (
+from mwa.harness.constraints import (
     ConstraintViolation,
     HardConstraintEvaluator,
     parse_constraint,
 )
-from soma.harness.map import HarnessMap
-from soma.harness.schema import (
+from mwa.harness.map import HarnessMap
+from mwa.harness.schema import (
     ConflictResolutionConfig,
     HarnessNodeSchema,
     HarnessSchema,

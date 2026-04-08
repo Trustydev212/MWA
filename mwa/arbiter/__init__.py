@@ -2,8 +2,8 @@
 
 This package owns the *decision* of what to do when two agents disagree
 about the value of a node.  It does **not** own the storage layer (that's
-``soma.world``) and it does **not** own the dependency graph (that's
-``soma.harness``); it just consumes both.
+``mwa.world``) and it does **not** own the dependency graph (that's
+``mwa.harness``); it just consumes both.
 
 Two resolution strategies live here:
 
@@ -17,9 +17,9 @@ we actually need the LLM in real workloads — a number we very much want
 to know before paying production token bills.
 """
 
-from soma.arbiter.detector import ConflictDetector
-from soma.arbiter.resolution import Resolution, ResolutionDecision
-from soma.arbiter.rules import RuleBasedResolver
+from mwa.arbiter.detector import ConflictDetector
+from mwa.arbiter.resolution import Resolution, ResolutionDecision
+from mwa.arbiter.rules import RuleBasedResolver
 
 __all__ = [
     "ConflictDetector",

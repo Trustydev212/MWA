@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from soma.arbiter import Resolution, ResolutionDecision, RuleBasedResolver
-from soma.types import Conflict, Episode, WriteProposal
+from mwa.arbiter import Resolution, ResolutionDecision, RuleBasedResolver
+from mwa.types import Conflict, Episode, WriteProposal
 
 
 def make_conflict(

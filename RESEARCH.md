@@ -6,20 +6,20 @@
 
 ---
 
-## Naming: SOMA vs MWA
+## Naming: MWA (final)
 
-Repo có **hai tên** đang lưu hành:
+Repo từng có hai tên đang cân nhắc song song:
 
 - **MWA** (Multi World Agent) — tên gốc trong README/ARCHITECTURE.md
-- **SOMA** (Shared Observer Multi Agent) — tên repo + commit init
+- **SOMA** (Shared Observer Multi Agent) — tên thay thế từng dùng cho
+  code package + commit init đầu tiên
 
-**Quyết định:** code package = `soma`, docs sẽ rename "MWA" → "SOMA" ở
-milestone tiếp theo. Lý do: SOMA mô tả chính xác hơn cơ chế (agents là
-*observers* của shared world, không phải agents *trong* world). MWA dễ
-nhầm với "multi-agent inside one world simulation" (game / robotics).
-
-**Ý nghĩa thêm:** "soma" trong sinh học = thân tế bào, nơi mọi tín hiệu
-hội tụ trước khi quyết định hành động. World Model = soma của agent network.
+**Quyết định cuối:** cả code package lẫn docs đều dùng **MWA**. Repo
+tên `MWA`, Python package `mwa`, brand name "Multi World Agent".
+Lý do: MWA là tên xuất hiện trước trong README/ARCHITECTURE, match
+với repo name, và tránh confusion của việc duy trì hai tên song song.
+Tên cũ "SOMA" đã được đổi hết trong một pass rename duy nhất —
+không để lại alias để khỏi nuôi tech debt.
 
 ---
 
@@ -27,7 +27,7 @@ hội tụ trước khi quyết định hành động. World Model = soma của 
 
 ### Decision: pydantic v2 thay vì stdlib dataclass
 
-**Lý do:** mọi layer trong SOMA đều phải defend chống malformed input từ
+**Lý do:** mọi layer trong MWA đều phải defend chống malformed input từ
 agents (qua REST/WebSocket/MCP). Pydantic cho free runtime validation +
 structured error messages. Stdlib dataclass chỉ cho compile-time type hints.
 
@@ -52,9 +52,9 @@ thể monkey-patch một symbol duy nhất.
 **Lý do:** không ai dùng *cả* anthropic + openai + gemini SDK trong cùng
 một project. User chỉ install những provider họ cần:
 ```bash
-uv pip install soma[anthropic]              # chỉ Claude
-uv pip install soma[anthropic,ollama]       # Claude + local
-uv pip install soma[all-llm]                # tất cả
+uv pip install mwa[anthropic]              # chỉ Claude
+uv pip install mwa[anthropic,ollama]       # Claude + local
+uv pip install mwa[all-llm]                # tất cả
 ```
 
 ### Lessons learned
@@ -120,7 +120,7 @@ theo hướng nào (expression-based? prolog-like?).
 ### Decision: bilingual keywords (Việt + Anh)
 
 **Lý do:** README example dùng tiếng Việt ("không thể đồng thời"), nhưng
-SOMA muốn open-source international. Parser support cả hai từ ngày đầu.
+MWA muốn open-source international. Parser support cả hai từ ngày đầu.
 
 **Trade-off:** parser code dài hơn. Acceptable vì DSL nhỏ.
 
@@ -279,7 +279,7 @@ Translation chiều nào cũng lossy — ví dụ Anthropic system prompts là
 separate field, OpenAI là một message role — converting đi converting
 lại sẽ lộ bugs tinh vi.
 
-**Quyết định:** SOMA định nghĩa *neutral* format (`Message(role, content)`)
+**Quyết định:** MWA định nghĩa *neutral* format (`Message(role, content)`)
 và mỗi adapter dịch từ neutral → vendor ở outbound, vendor → neutral ở
 inbound. Neutral format intentionally minimal — chỉ cover what *every*
 provider supports. Vendor-specific features sống trong `ChatResponse.raw`
@@ -288,7 +288,7 @@ dict.
 ### Decision: Error hierarchy 3 levels mapped to retry semantics
 
 ```
-LLMProviderError (base, from soma.errors)
+LLMProviderError (base, from mwa.errors)
 ├── RateLimitError           → retry with backoff
 ├── TransientProviderError   → retry with backoff  (5xx, network, timeout)
 ├── PermanentProviderError   → DON'T retry         (4xx, auth, bad model)
@@ -297,11 +297,11 @@ LLMProviderError (base, from soma.errors)
 
 Mỗi adapter có một `_translate_error(exc)` method maps vendor exception
 names (`RateLimitError`, `AuthenticationError`, `APIConnectionError`, ...)
-sang SOMA hierarchy. **RetryPolicy** dùng hierarchy này — không phải
+sang MWA hierarchy. **RetryPolicy** dùng hierarchy này — không phải
 enumerate mọi vendor exception.
 
 Lý do tách `PermanentProviderError` vs `TransientProviderError`: retry
-một permanent error (invalid API key) vô nghĩa — chỉ đốt budget. SOMA
+một permanent error (invalid API key) vô nghĩa — chỉ đốt budget. MWA
 fail fast và cho router thử fallback provider với key khác.
 
 ### Decision: `ResponseSchemaError` KHÔNG retry
@@ -326,12 +326,12 @@ def __init__(self, *, model: str, client=None, ...):
         try:
             from anthropic import AsyncAnthropic  # ← lazy
         except ImportError:
-            raise PermanentProviderError("...install soma[anthropic]")
+            raise PermanentProviderError("...install mwa[anthropic]")
         self._client = AsyncAnthropic(...)
 ```
 
 **3 lợi ích:**
-1. **Importable without SDKs**: `import soma.llm.providers` chạy được
+1. **Importable without SDKs**: `import mwa.llm.providers` chạy được
    ngay cả khi không có anthropic/openai/httpx cài. Tests chạy offline.
 2. **Dependency injection**: tests pass fake client → test translation
    logic mà không cần mock `anthropic.AsyncAnthropic.messages.create`.
@@ -341,14 +341,14 @@ def __init__(self, *, model: str, client=None, ...):
 Cost: mypy complain về missing imports. Fix: `ignore_missing_imports`
 cho anthropic/openai/httpx trong `pyproject.toml`.
 
-### Decision: FakeProvider sống trong `soma.llm.providers`, KHÔNG `tests/`
+### Decision: FakeProvider sống trong `mwa.llm.providers`, KHÔNG `tests/`
 
 Phản trực giác nhưng đúng. FakeProvider là **public API** — users build
-agents trên SOMA cũng cần mock LLM để unit test agent logic của họ. Nếu
-FakeProvider sống trong `tests/`, user phải copy-paste từ SOMA repo vào
+agents trên MWA cũng cần mock LLM để unit test agent logic của họ. Nếu
+FakeProvider sống trong `tests/`, user phải copy-paste từ MWA repo vào
 project riêng → fragile, stale.
 
-**Quyết định:** `from soma.llm.providers import FakeProvider`. Part of
+**Quyết định:** `from mwa.llm.providers import FakeProvider`. Part of
 the shipped package. Tests import nó như mọi user khác.
 
 ### Decision: LLMRouter handle permanent errors giống transient
@@ -469,7 +469,7 @@ Những thứ chưa biết câu trả lời, cần research khi build các miles
   nào". Replay từ version số là đủ hay cần snapshot + delta?
 
 ### Production / Open Source (Milestone 7+)
-- **Multi-tenancy:** một SOMA runtime serve nhiều World Models đồng thời?
+- **Multi-tenancy:** một MWA runtime serve nhiều World Models đồng thời?
   Hay một runtime per world?
 - **Authentication:** agents identify như thế nào? API key per agent?
 - **Audit log:** mỗi episode + arbitration cần persistent log để debug.
@@ -487,4 +487,4 @@ Những thứ chưa biết câu trả lời, cần research khi build các miles
       world model concept
 - [ ] **CodeCRDT** (2025) — multi-agent code generation với CRDT
 - [ ] **MCP spec** — kiểm tra cách MCP serialize structured data, có thể
-      reuse cho SOMA's WorldInspector API
+      reuse cho MWA's WorldInspector API

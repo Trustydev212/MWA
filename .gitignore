@@ -47,8 +47,8 @@ coverage.xml
 .env.local
 .envrc
 
-# SOMA local data
-.soma/
+# MWA local data
+.mwa/
 local_data/
 *.dump
 neo4j_data/

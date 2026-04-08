@@ -15,9 +15,9 @@ name: Live LLM smoke test
 # 1. In the repo UI, add three Actions *secrets* (Settings → Secrets and
 #    variables → Actions → New repository secret):
 #
-#        SOMA_LIVE_API_KEY    - the provider bearer token (e.g. sk-futrix-...)
-#        SOMA_LIVE_BASE_URL   - e.g. https://futrixapi.com/v1
-#        SOMA_LIVE_MODEL      - e.g. auto  (or gpt-4o-mini, claude-opus-4-6, etc.)
+#        MWA_LIVE_API_KEY    - the provider bearer token (e.g. sk-futrix-...)
+#        MWA_LIVE_BASE_URL   - e.g. https://futrixapi.com/v1
+#        MWA_LIVE_MODEL      - e.g. auto  (or gpt-4o-mini, claude-opus-4-6, etc.)
 #
 # 2. Go to Actions → "Live LLM smoke test" → "Run workflow".
 # 3. Watch the log for the structured chat response preview and usage counts.
@@ -57,17 +57,17 @@ jobs:
       - name: Install uv
         run: python -m pip install --upgrade pip uv
 
-      - name: Install SOMA + openai extras
+      - name: Install MWA + openai extras
         run: uv pip install --system -e ".[openai,dev]"
 
       - name: Sanity-check secrets are set
         env:
-          SOMA_LIVE_API_KEY: ${{ secrets.SOMA_LIVE_API_KEY }}
-          SOMA_LIVE_BASE_URL: ${{ secrets.SOMA_LIVE_BASE_URL }}
-          SOMA_LIVE_MODEL: ${{ secrets.SOMA_LIVE_MODEL }}
+          MWA_LIVE_API_KEY: ${{ secrets.MWA_LIVE_API_KEY }}
+          MWA_LIVE_BASE_URL: ${{ secrets.MWA_LIVE_BASE_URL }}
+          MWA_LIVE_MODEL: ${{ secrets.MWA_LIVE_MODEL }}
         run: |
           missing=0
-          for var in SOMA_LIVE_API_KEY SOMA_LIVE_BASE_URL SOMA_LIVE_MODEL; do
+          for var in MWA_LIVE_API_KEY MWA_LIVE_BASE_URL MWA_LIVE_MODEL; do
             if [ -z "${!var}" ]; then
               echo "::error::Missing secret $var — add it in Settings → Secrets and variables → Actions"
               missing=1
@@ -82,26 +82,26 @@ jobs:
       - name: Raw probe (diagnostic)
         if: ${{ inputs.verbose }}
         env:
-          SOMA_LIVE_API_KEY: ${{ secrets.SOMA_LIVE_API_KEY }}
-          SOMA_LIVE_BASE_URL: ${{ secrets.SOMA_LIVE_BASE_URL }}
-          SOMA_LIVE_MODEL: ${{ secrets.SOMA_LIVE_MODEL }}
+          MWA_LIVE_API_KEY: ${{ secrets.MWA_LIVE_API_KEY }}
+          MWA_LIVE_BASE_URL: ${{ secrets.MWA_LIVE_BASE_URL }}
+          MWA_LIVE_MODEL: ${{ secrets.MWA_LIVE_MODEL }}
         run: |
           python - <<'PY'
           import asyncio, os, json
-          from soma.llm.base import ChatOptions, Message, MessageRole
-          from soma.llm.providers import OpenAIProvider
+          from mwa.llm.base import ChatOptions, Message, MessageRole
+          from mwa.llm.providers import OpenAIProvider
 
           async def main() -> None:
               provider = OpenAIProvider(
-                  model=os.environ["SOMA_LIVE_MODEL"],
-                  api_key=os.environ["SOMA_LIVE_API_KEY"],
-                  base_url=os.environ["SOMA_LIVE_BASE_URL"],
+                  model=os.environ["MWA_LIVE_MODEL"],
+                  api_key=os.environ["MWA_LIVE_API_KEY"],
+                  base_url=os.environ["MWA_LIVE_BASE_URL"],
               )
               print(f"[probe] provider.name={provider.name}  model={provider.model}")
               response = await provider.chat(
                   [
                       Message(role=MessageRole.SYSTEM, content="You reply in under 12 words."),
-                      Message(role=MessageRole.USER, content="Say hello from SOMA and name one model you could be."),
+                      Message(role=MessageRole.USER, content="Say hello from MWA and name one model you could be."),
                   ],
                   options=ChatOptions(temperature=0.0, max_tokens=64),
               )
@@ -117,8 +117,8 @@ jobs:
 
       - name: Run pytest integration suite
         env:
-          SOMA_LIVE_API_KEY: ${{ secrets.SOMA_LIVE_API_KEY }}
-          SOMA_LIVE_BASE_URL: ${{ secrets.SOMA_LIVE_BASE_URL }}
-          SOMA_LIVE_MODEL: ${{ secrets.SOMA_LIVE_MODEL }}
+          MWA_LIVE_API_KEY: ${{ secrets.MWA_LIVE_API_KEY }}
+          MWA_LIVE_BASE_URL: ${{ secrets.MWA_LIVE_BASE_URL }}
+          MWA_LIVE_MODEL: ${{ secrets.MWA_LIVE_MODEL }}
         run: |
           uv run pytest -m integration tests/llm/test_live_openai_compat.py -v --tb=short

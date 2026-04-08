@@ -6,8 +6,8 @@ from decimal import Decimal
 
 import pytest
 
-from soma.errors import LLMProviderError
-from soma.llm import (
+from mwa.errors import LLMProviderError
+from mwa.llm import (
     LLMRouter,
     Message,
     MessageRole,
@@ -17,7 +17,7 @@ from soma.llm import (
     RetryPolicy,
     TransientProviderError,
 )
-from soma.llm.providers import FakeProvider
+from mwa.llm.providers import FakeProvider
 
 
 async def _noop_sleep(_: float) -> None:

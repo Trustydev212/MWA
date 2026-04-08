@@ -1,6 +1,6 @@
 """LLMRouter — fallback chain + retry + per-call budget.
 
-The Router is the *only* place in SOMA that knows how to handle a
+The Router is the *only* place in MWA that knows how to handle a
 failing LLM call gracefully.  Every other layer just asks a "provider"
 to chat and gets a response back; the Router is what makes that
 provider resilient in the face of rate limits, outages, and cost
@@ -33,16 +33,16 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
-from soma.errors import LLMProviderError
-from soma.llm.base import (
+from mwa.errors import LLMProviderError
+from mwa.llm.base import (
     ChatOptions,
     ChatResponse,
     LLMProvider,
     Message,
     Usage,
 )
-from soma.llm.cost import PricingTable, calculate_cost
-from soma.llm.retry import RetryPolicy
+from mwa.llm.cost import PricingTable, calculate_cost
+from mwa.llm.retry import RetryPolicy
 
 T_Schema = TypeVar("T_Schema", bound=BaseModel)
 

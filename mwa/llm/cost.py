@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from soma.llm.base import Usage
+from mwa.llm.base import Usage
 
 
 @dataclass(frozen=True)

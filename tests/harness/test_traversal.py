@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from soma.errors import HarnessMapError
-from soma.harness import HarnessMap
+from mwa.errors import HarnessMapError
+from mwa.harness import HarnessMap
 
 
 @pytest.fixture

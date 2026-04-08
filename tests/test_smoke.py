@@ -10,25 +10,25 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-import soma
-from soma.errors import (
+import mwa
+from mwa.errors import (
     ConflictError,
     HardConstraintViolation,
     HarnessMapError,
     LLMProviderError,
-    SomaError,
+    MWAError,
     WorldModelError,
 )
-from soma.types import Conflict, Episode, Impact, WriteProposal, WriteResult
+from mwa.types import Conflict, Episode, Impact, WriteProposal, WriteResult
 
 
 def test_package_has_version() -> None:
-    assert isinstance(soma.__version__, str)
-    assert soma.__version__.count(".") >= 1
+    assert isinstance(mwa.__version__, str)
+    assert mwa.__version__.count(".") >= 1
 
 
 def test_error_hierarchy() -> None:
-    """Every SOMA error must be catchable as ``SomaError``."""
+    """Every MWA error must be catchable as ``MWAError``."""
     for cls in (
         HarnessMapError,
         HardConstraintViolation,
@@ -36,7 +36,7 @@ def test_error_hierarchy() -> None:
         LLMProviderError,
         WorldModelError,
     ):
-        assert issubclass(cls, SomaError), f"{cls.__name__} must subclass SomaError"
+        assert issubclass(cls, MWAError), f"{cls.__name__} must subclass MWAError"
 
 
 def test_hard_constraint_violation_carries_context() -> None:
@@ -49,7 +49,7 @@ def test_hard_constraint_violation_carries_context() -> None:
     assert err.constraint == "duration_unique"
     assert err.node == "duration"
     assert err.value == 60
-    assert isinstance(err, SomaError)
+    assert isinstance(err, MWAError)
 
 
 def test_impact_weights_are_monotonic() -> None:

@@ -1,4 +1,4 @@
-"""Shared dataclasses used across SOMA layers.
+"""Shared dataclasses used across MWA layers.
 
 These types are deliberately small and storage-agnostic.  They describe
 *what* is being written/read/contradicted, not *how* it is persisted.
@@ -7,7 +7,7 @@ Design notes
 ------------
 - We use ``pydantic.BaseModel`` (not stdlib dataclass) so callers get free
   runtime validation when constructing values from JSON / dict input — every
-  layer in SOMA needs to defend against malformed agent payloads.
+  layer in MWA needs to defend against malformed agent payloads.
 - Timestamps are timezone-aware UTC.  ``datetime.utcnow()`` is naive and was
   deprecated in Python 3.12; we use ``datetime.now(UTC)`` everywhere.
 - ``confidence`` is bounded to ``[0, 1]`` and validated at construction time
