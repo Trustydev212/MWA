@@ -264,6 +264,171 @@ escalations). Sẽ tune sau khi có real workload data.
 
 ---
 
+## Milestone 2 — LLM Provider Layer (provider-agnostic)
+
+M2 ship sau M3 (không theo thứ tự số) vì M3 không cần LLM để chạy demo,
+còn M4 (Semantic Arbiter) thì bắt buộc cần M2. Build M2 bây giờ = M4
+plug thẳng vào, không refactor.
+
+### Decision: Neutral message format thay vì vendor format
+
+Lần đầu nghĩ "dùng Anthropic format làm source of truth" vì user primary
+dùng Claude. Nhưng điều đó nghĩa là OpenAI adapter phải translate
+Anthropic→OpenAI, Gemini adapter phải translate Anthropic→Gemini, vv.
+Translation chiều nào cũng lossy — ví dụ Anthropic system prompts là
+separate field, OpenAI là một message role — converting đi converting
+lại sẽ lộ bugs tinh vi.
+
+**Quyết định:** SOMA định nghĩa *neutral* format (`Message(role, content)`)
+và mỗi adapter dịch từ neutral → vendor ở outbound, vendor → neutral ở
+inbound. Neutral format intentionally minimal — chỉ cover what *every*
+provider supports. Vendor-specific features sống trong `ChatResponse.raw`
+dict.
+
+### Decision: Error hierarchy 3 levels mapped to retry semantics
+
+```
+LLMProviderError (base, from soma.errors)
+├── RateLimitError           → retry with backoff
+├── TransientProviderError   → retry with backoff  (5xx, network, timeout)
+├── PermanentProviderError   → DON'T retry         (4xx, auth, bad model)
+└── ResponseSchemaError      → DON'T retry         (deterministic, wastes budget)
+```
+
+Mỗi adapter có một `_translate_error(exc)` method maps vendor exception
+names (`RateLimitError`, `AuthenticationError`, `APIConnectionError`, ...)
+sang SOMA hierarchy. **RetryPolicy** dùng hierarchy này — không phải
+enumerate mọi vendor exception.
+
+Lý do tách `PermanentProviderError` vs `TransientProviderError`: retry
+một permanent error (invalid API key) vô nghĩa — chỉ đốt budget. SOMA
+fail fast và cho router thử fallback provider với key khác.
+
+### Decision: `ResponseSchemaError` KHÔNG retry
+
+Provider trả về JSON không match schema → **không retry**. Lý do:
+
+- Retry sẽ deterministic (cùng input → cùng broken output)
+- Best-of-N strategy cần prompt engineering, không phải retry
+- Retry wastes budget với xác suất cao (0%?) fix được
+
+Caller nào muốn best-of-N phải catch explicitly và reshape prompt.
+
+### Decision: Lazy SDK imports (adapter lazy-loads vendor SDK ở `__init__`)
+
+Mọi adapter dùng pattern:
+
+```python
+def __init__(self, *, model: str, client=None, ...):
+    if client is not None:
+        self._client = client  # dependency injection (tests!)
+    else:
+        try:
+            from anthropic import AsyncAnthropic  # ← lazy
+        except ImportError:
+            raise PermanentProviderError("...install soma[anthropic]")
+        self._client = AsyncAnthropic(...)
+```
+
+**3 lợi ích:**
+1. **Importable without SDKs**: `import soma.llm.providers` chạy được
+   ngay cả khi không có anthropic/openai/httpx cài. Tests chạy offline.
+2. **Dependency injection**: tests pass fake client → test translation
+   logic mà không cần mock `anthropic.AsyncAnthropic.messages.create`.
+3. **Clear error message**: người dùng dùng provider mà chưa cài extra
+   nhận được exact install command, không phải ImportError stacktrace.
+
+Cost: mypy complain về missing imports. Fix: `ignore_missing_imports`
+cho anthropic/openai/httpx trong `pyproject.toml`.
+
+### Decision: FakeProvider sống trong `soma.llm.providers`, KHÔNG `tests/`
+
+Phản trực giác nhưng đúng. FakeProvider là **public API** — users build
+agents trên SOMA cũng cần mock LLM để unit test agent logic của họ. Nếu
+FakeProvider sống trong `tests/`, user phải copy-paste từ SOMA repo vào
+project riêng → fragile, stale.
+
+**Quyết định:** `from soma.llm.providers import FakeProvider`. Part of
+the shipped package. Tests import nó như mọi user khác.
+
+### Decision: LLMRouter handle permanent errors giống transient
+
+Lần đầu nghĩ: permanent error trên primary (invalid API key) → abort cả
+router call. Logic: "nếu key sai thì retry cũng sai, fallback cũng sai".
+
+**Sai.** Fallback provider có thể là provider khác hoàn toàn (OpenAI thay
+vì Anthropic) với key khác hoàn toàn. Primary fail permanent ≠ secondary
+fail permanent.
+
+**Quyết định:** Router catch `LLMProviderError` (superclass) và fall
+through to next provider, regardless of transient/permanent. RetryPolicy
+bên trong mỗi provider đã quyết KHÔNG retry permanent errors (đúng). Ở
+router level, permanent errors chỉ đơn giản tiêu thụ attempt đó và move on.
+
+Fix bug: initial code có branch `except PermanentProviderError: raise`
+nhưng cũng set `last_error = None` ngay trước — contradictory. Caught
+trong review trước khi ship.
+
+### Decision: Budget gate là *pessimistic* (over-estimate)
+
+Router tính cost estimate trước call:
+```
+input_tokens = sum over messages
+output_tokens = options.max_tokens OR 1024
+```
+
+Over-estimate output (assume hits cap) có nghĩa budget gate *hơi strict*
+hơn reality. Trade-off: thà skip một provider không cần thiết còn hơn
+blow budget. "Hơi strict" có thể chỉnh bằng cách tune max_tokens.
+
+### Decision: Decimal cho cost, không float
+
+```python
+PricingEntry(Decimal("3.00"), Decimal("15.00"))
+```
+
+Billing arithmetic trên millions of tokens accumulate float error nhanh.
+`Decimal` chậm hơn 10x nhưng số lượng cost operations < số lượng token
+operations, và precision matters cho billing.
+
+### Decision: Placeholder pricing table, documented as such
+
+Vendor pricing move constantly — ship hard-coded prices trong repo sẽ
+misleading trong 3 tháng. Ship placeholder table với comment rõ
+"these are rough estimates" và public `PricingTable.set()` API cho users
+override.
+
+### Lessons learned
+
+1. **`@runtime_checkable` Protocol bắt sai methods signature ngay.**
+   FakeProvider ban đầu thiếu `count_tokens` → test `isinstance(fake, LLMProvider)`
+   fail ngay. Xác nhận Protocol approach work đúng.
+
+2. **Mock SDK clients tốt hơn mock network calls.** Tests hand-roll
+   `_FakeAnthropicClient`, `_FakeOpenAIClient`, `_FakeHttpxClient` với
+   dataclasses. Lợi ích: không cần `unittest.mock.patch`, không cần
+   import real SDK, test chính xác translation logic.
+
+3. **Lazy imports + dependency injection = testable adapter.** Key
+   insight: adapter `__init__` accept `client=None` parameter. Tests
+   pass fake client → real SDK không bao giờ được import. Production
+   dùng `client=None` → lazy import từ vendor SDK.
+
+4. **Reading request body trong test catch payload bugs.**
+   `fake_client.messages.create_calls[0]` expose raw kwargs → assert
+   đúng format (system as separate field, tool_choice dict shape, ...).
+   Catch được bug sớm khi adapter translate sai.
+
+5. **PermanentError ≠ terminal error ở router level.** Phải nhớ router
+   có nhiều providers độc lập — permanent trên một provider có thể hồi
+   phục trên provider khác. Logic "try next provider regardless" đơn
+   giản hơn và đúng hơn "abort on permanent".
+
+6. **Ruff tự động reformat tests** — chạy `ruff format` trước `pytest`
+   cuối cùng để tránh format drift.
+
+---
+
 ## Open Research Questions
 
 Những thứ chưa biết câu trả lời, cần research khi build các milestone sau:

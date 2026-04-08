@@ -101,3 +101,9 @@ no_implicit_optional = true
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false
+
+# Optional LLM SDKs — installed only via the matching extra.  Without this
+# override, mypy in a minimal dev env errors on their TYPE_CHECKING imports.
+[[tool.mypy.overrides]]
+module = ["anthropic", "anthropic.*", "openai", "openai.*", "httpx", "httpx.*"]
+ignore_missing_imports = true
