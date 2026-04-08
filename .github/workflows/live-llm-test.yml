@@ -91,11 +91,18 @@ jobs:
           from mwa.llm.base import ChatOptions, Message, MessageRole
           from mwa.llm.providers import OpenAIProvider
 
+          # .strip() is load-bearing: GitHub secrets copy-pasted from mobile
+          # keyboards routinely carry trailing whitespace / newlines, which
+          # httpx.URL rejects as "Invalid non-printable ASCII character".
+          model    = os.environ["MWA_LIVE_MODEL"].strip()
+          api_key  = os.environ["MWA_LIVE_API_KEY"].strip()
+          base_url = os.environ["MWA_LIVE_BASE_URL"].strip()
+
           async def main() -> None:
               provider = OpenAIProvider(
-                  model=os.environ["MWA_LIVE_MODEL"],
-                  api_key=os.environ["MWA_LIVE_API_KEY"],
-                  base_url=os.environ["MWA_LIVE_BASE_URL"],
+                  model=model,
+                  api_key=api_key,
+                  base_url=base_url,
               )
               print(f"[probe] provider.name={provider.name}  model={provider.model}")
               response = await provider.chat(
