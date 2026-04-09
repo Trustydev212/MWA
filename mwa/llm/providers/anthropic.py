@@ -82,17 +82,14 @@ class AnthropicProvider:
         *,
         options: ChatOptions | None = None,
     ) -> ChatResponse:
-        system, api_messages = self._translate_messages(messages)
-        opts = options or ChatOptions()
-
         try:
+            # Passing ``**kwargs`` (dict[str, Any]) lets mypy treat the call
+            # as Any, which bypasses the SDK's strict TypedDict signatures
+            # for ``messages``/``stop_sequences``/etc.  The wire format is
+            # identical to what the SDK wants; we just avoid writing out
+            # every TypedDict by hand.  Same pattern as OpenAIProvider.
             raw = await self._client.messages.create(
-                model=self._model,
-                messages=api_messages,
-                system=system or "",
-                max_tokens=opts.max_tokens or self._max_tokens_default,
-                temperature=opts.temperature,
-                stop_sequences=list(opts.stop) or None,
+                **self._build_request_kwargs(messages, options)
             )
         except Exception as exc:  # pragma: no cover - exercised via mock
             raise self._translate_error(exc) from exc
@@ -105,17 +102,9 @@ class AnthropicProvider:
         *,
         options: ChatOptions | None = None,
     ) -> AsyncIterator[ChatChunk]:
-        system, api_messages = self._translate_messages(messages)
-        opts = options or ChatOptions()
-
         try:
             async with self._client.messages.stream(
-                model=self._model,
-                messages=api_messages,
-                system=system or "",
-                max_tokens=opts.max_tokens or self._max_tokens_default,
-                temperature=opts.temperature,
-                stop_sequences=list(opts.stop) or None,
+                **self._build_request_kwargs(messages, options)
             ) as stream:
                 async for delta in stream.text_stream:
                     yield ChatChunk(delta=delta)
@@ -136,9 +125,6 @@ class AnthropicProvider:
         We register the schema as a single tool and force the model to
         call it via ``tool_choice={"type": "tool", "name": ...}``.
         """
-        system, api_messages = self._translate_messages(messages)
-        opts = options or ChatOptions()
-
         tool_name = schema.__name__
         tool = {
             "name": tool_name,
@@ -146,16 +132,12 @@ class AnthropicProvider:
             "input_schema": schema.model_json_schema(),
         }
 
+        kwargs = self._build_request_kwargs(messages, options)
+        kwargs["tools"] = [tool]
+        kwargs["tool_choice"] = {"type": "tool", "name": tool_name}
+
         try:
-            raw = await self._client.messages.create(
-                model=self._model,
-                messages=api_messages,
-                system=system or "",
-                max_tokens=opts.max_tokens or self._max_tokens_default,
-                temperature=opts.temperature,
-                tools=[tool],
-                tool_choice={"type": "tool", "name": tool_name},
-            )
+            raw = await self._client.messages.create(**kwargs)
         except Exception as exc:  # pragma: no cover
             raise self._translate_error(exc) from exc
 
@@ -184,6 +166,36 @@ class AnthropicProvider:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    def _build_request_kwargs(
+        self,
+        messages: Sequence[Message],
+        options: ChatOptions | None,
+    ) -> dict[str, Any]:
+        """Build the kwargs dict for ``messages.create`` / ``messages.stream``.
+
+        Centralised so ``chat``, ``stream`` and ``structured`` all produce
+        identical base payloads and we only have one place to worry about
+        optional-field omission semantics (same pattern as OpenAIProvider).
+
+        Anthropic's SDK strictly types ``stop_sequences`` as
+        ``SequenceNotStr[str] | Omit`` — passing ``None`` is a type error
+        under the real SDK stubs, so we omit the field when ``opts.stop``
+        is empty rather than setting it to ``None``.
+        """
+        system, api_messages = self._translate_messages(messages)
+        opts = options or ChatOptions()
+
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": api_messages,
+            "system": system or "",
+            "max_tokens": opts.max_tokens or self._max_tokens_default,
+            "temperature": opts.temperature,
+        }
+        if opts.stop:
+            kwargs["stop_sequences"] = list(opts.stop)
+        return kwargs
 
     @staticmethod
     def _translate_messages(
