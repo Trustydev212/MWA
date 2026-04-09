@@ -11,6 +11,32 @@ _Nothing yet — next on deck is M5 (Transport / WebSocket) and M8
 (Graphiti backend).  Neither is blocking any current use case;
 order depends on which one a real user asks for first._
 
+## [0.1.1] — 2026-04-09
+
+### Changed
+
+- **PyPI distribution name**: `mwa` → `multi-world-agent`.  The short
+  three-letter `mwa` name was already reserved on PyPI by a different
+  account, so every attempt to publish ``0.1.0`` returned a
+  ``403 The user 'Phamtrusty' isn't allowed to upload to project 'mwa'``.
+  Renaming the distribution unblocks the first public release.
+- **Python module name is unchanged**: ``import mwa`` still works —
+  only the PyPI distribution name is longer.  Users run
+  ``pip install multi-world-agent`` but then ``from mwa.sdk import
+  WorldAgent``.  Same pattern as ``pip install scikit-learn`` /
+  ``import sklearn``.
+- README, `docs/getting-started.md`, `docs/release.md`, and the
+  PyPI/Python badge links all updated to the new distribution name.
+
+### Technical note
+
+The ``mwa`` name on PyPI remains reserved — if a future maintainer
+is able to claim it through PyPI's abandoned-project process
+(<https://pypi.org/help/#project-name>), we can add ``mwa`` back as
+a secondary distribution alongside ``multi-world-agent`` rather than
+renaming again.  Until then, ``multi-world-agent`` is the canonical
+PyPI name.
+
 ## [0.1.0] — 2026-04-08
 
 First public alpha.  Ships milestones M0 through M7 plus the

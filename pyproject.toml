@@ -1,6 +1,6 @@
 [project]
-name = "mwa"
-version = "0.1.0"
+name = "multi-world-agent"
+version = "0.1.1"
 description = "MWA — Multi World Agent. Agents don't talk to each other; they observe the same world."
 readme = "README.md"
 requires-python = ">=3.11"

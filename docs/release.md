@@ -99,7 +99,7 @@ From a fresh venv:
 python -m venv /tmp/verify-release
 source /tmp/verify-release/bin/activate
 pip install --upgrade pip
-pip install mwa==0.1.0
+pip install multi-world-agent==0.1.1
 python -c "
 import mwa
 from mwa.sdk import AgentRuntime, WorldAgent
@@ -117,11 +117,11 @@ If a release is broken and needs to come off PyPI **immediately**:
 
 ### Option 1 — Yank (preferred)
 
-Yanking hides the release from `pip install mwa` (without a version
-pin) but leaves it downloadable for users who pinned it.  Non-
-destructive.
+Yanking hides the release from `pip install multi-world-agent`
+(without a version pin) but leaves it downloadable for users who
+pinned it.  Non-destructive.
 
-1. Go to https://pypi.org/manage/project/mwa/releases/.
+1. Go to https://pypi.org/manage/project/multi-world-agent/releases/.
 2. Click the broken release → **Yank release** → provide a reason
    (will be shown to users who try to install a pinned version).
 
@@ -171,8 +171,8 @@ git push origin v0.2.0-rc1
 ```
 
 PyPI recognises the `-rc1` suffix and marks the release as a
-pre-release — it won't be installed by `pip install mwa` without
-an explicit `--pre` flag.
+pre-release — it won't be installed by `pip install multi-world-agent`
+without an explicit `--pre` flag.
 
 ## FAQ
 
@@ -193,8 +193,9 @@ https://pypi.org/manage/account/publishing/.
 
 Because a broken wheel is worse than a failed release.  The minute
 we skip the test gate, someone will push a tag from a branch that
-regressed `mwa.sdk` and `pip install mwa` will ship broken code to
-every user.  The ~2 minute test run is cheap insurance.
+regressed `mwa.sdk` and `pip install multi-world-agent` will ship
+broken code to every user.  The ~2 minute test run is cheap
+insurance.
 
 ### Can I publish from my local machine instead?
 

@@ -8,22 +8,28 @@ This doc walks you from `pip install` to a running multi-agent system in ~10 min
 
 ```bash
 # Minimum install — just the library
-pip install mwa
+pip install multi-world-agent
 
 # With your LLM provider of choice
-pip install mwa[anthropic]     # Claude
-pip install mwa[openai]        # GPT-4/4o, o-series, or OpenAI-compatible gateways
-pip install mwa[ollama]        # local Llama via Ollama
+pip install "multi-world-agent[anthropic]"   # Claude
+pip install "multi-world-agent[openai]"      # GPT-4/4o, o-series, or OpenAI-compatible gateways
+pip install "multi-world-agent[ollama]"      # local Llama via Ollama
 
 # With the MCP server (plug into Claude Code, Cursor, Codex)
-pip install mwa[mcp]
+pip install "multi-world-agent[mcp]"
 
 # Everything
-pip install mwa[all]
+pip install "multi-world-agent[all]"
 
 # Dev dependencies
-pip install mwa[dev]
+pip install "multi-world-agent[dev]"
 ```
+
+> **Distribution name vs module name:** the PyPI package is
+> `multi-world-agent` (the short `mwa` was already reserved on PyPI)
+> but the Python module stays short: `import mwa`.  Same pattern as
+> `pip install scikit-learn` / `import sklearn`.  The extras shell-
+> quote because some shells treat `[...]` as a glob pattern.
 
 Python 3.11+ required.
 
@@ -214,7 +220,7 @@ Nothing silently falls back to last-write-wins. That's the whole reason MWA exis
 Once you've got a harness map, expose the runtime to any MCP host (Claude Code, Cursor, Codex, …):
 
 ```bash
-pip install mwa[mcp]
+pip install "multi-world-agent[mcp]"
 MWA_HARNESS_PATH=./my_harness.json mwa-mcp
 ```
 

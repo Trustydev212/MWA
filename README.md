@@ -2,18 +2,23 @@
 
 > **"Agents don't talk to each other. They observe the same world."**
 
-[![PyPI](https://img.shields.io/pypi/v/mwa.svg)](https://pypi.org/project/mwa/)
-[![Python](https://img.shields.io/pypi/pyversions/mwa.svg)](https://pypi.org/project/mwa/)
+[![PyPI](https://img.shields.io/pypi/v/multi-world-agent.svg)](https://pypi.org/project/multi-world-agent/)
+[![Python](https://img.shields.io/pypi/pyversions/multi-world-agent.svg)](https://pypi.org/project/multi-world-agent/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Status: Alpha](https://img.shields.io/badge/Status-Alpha-green)]()
 
 ```bash
-pip install mwa                   # core library
-pip install mwa[openai]           # + OpenAI / OpenAI-compatible gateway support
-pip install mwa[anthropic]        # + Claude
-pip install mwa[mcp]              # + MCP server (plug into Claude Code / Cursor)
-pip install mwa[all]              # everything except dev tools
+pip install multi-world-agent                   # core library
+pip install "multi-world-agent[openai]"         # + OpenAI / OpenAI-compatible gateway support
+pip install "multi-world-agent[anthropic]"      # + Claude
+pip install "multi-world-agent[mcp]"            # + MCP server (plug into Claude Code / Cursor)
+pip install "multi-world-agent[all]"            # everything except dev tools
 ```
+
+> **PyPI name**: `multi-world-agent` (the short `mwa` was already reserved on PyPI).
+> **Python import**: `import mwa` — module name stays short even though the
+> distribution name is longer.  Same pattern as `pip install scikit-learn` but
+> `import sklearn`.
 
 Quick look: see [`docs/getting-started.md`](docs/getting-started.md)
 for a 10-minute walkthrough, or [`examples/openclaw_team/`](examples/openclaw_team/)
