@@ -185,4 +185,18 @@ jobs:
             echo "::error::Settings → Secrets and variables → Actions."
             exit 1
           fi
-          twine upload --disable-progress-bar dist/*
+          # Token sanity probe — print structural info ONLY (never the
+          # raw value).  Lets us catch silently-mangled secrets (wrong
+          # length, missing ``pypi-`` prefix, whitespace padding) in
+          # the log even though twine's ``***`` masking hides the
+          # real token.
+          python -c "
+          import os
+          t = os.environ['TWINE_PASSWORD']
+          print(f'[probe] token length        = {len(t)}')
+          print(f'[probe] token starts pypi-  = {t.startswith(\"pypi-\")}')
+          print(f'[probe] token has whitespace= {any(c.isspace() for c in t)}')
+          "
+          # --verbose so PyPI's actual error body ends up in the log.
+          # Default twine swallows it behind a generic 'Forbidden'.
+          twine upload --verbose --disable-progress-bar dist/*
