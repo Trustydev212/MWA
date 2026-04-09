@@ -1,0 +1,188 @@
+name: Release to PyPI
+
+# Runs the full test suite, builds sdist + wheel, and uploads to PyPI.
+#
+# Triggered in two ways:
+#
+# 1. **Automatic** — pushing a version tag (`v0.1.0`, `v0.2.3-rc1`, etc.)
+#    auto-runs the whole pipeline up to and including the PyPI upload.
+#    This is the intended release path.
+#
+# 2. **Manual** — ``workflow_dispatch`` with ``dry_run`` defaulting to
+#    true.  Runs tests + build + ``twine check`` but SKIPS the upload.
+#    Use this to validate a release candidate without burning a version.
+#    Set ``dry_run: false`` in the UI to actually push from a manual
+#    trigger (rare — normally you'd just tag instead).
+#
+# Secrets expected
+# ----------------
+# ``PYPI_API_TOKEN`` — PyPI API token with ``upload`` scope on the
+# ``mwa`` project.  Create one at https://pypi.org/manage/account/token/
+# and store it at Settings → Secrets and variables → Actions → New
+# repository secret.  Use a project-scoped token (not account-wide)
+# once the project has been uploaded at least once.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build + verify only — skip actual PyPI upload"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  # One release run at a time.  Cancelling a release mid-flight is
+  # unsafe (half-uploaded artefacts) so we queue instead.
+  group: release
+  cancel-in-progress: false
+
+env:
+  # Opt into Node.js 24 early — the live-llm-test workflow already
+  # does this, keep parity so action compatibility stays verified
+  # across both workflows.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  # ------------------------------------------------------------------
+  # 1. Full test suite against a fresh install tree.
+  # ------------------------------------------------------------------
+  test:
+    name: Test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        run: python -m pip install --upgrade pip uv
+
+      - name: Install MWA with every non-live extra
+        # [dev] for pytest/mypy/ruff, [anthropic]/[openai]/[ollama] so the
+        # provider translation tests import their vendor SDKs, [mcp] so
+        # the MCP server protocol wiring test runs.
+        run: uv pip install --system -e ".[dev,anthropic,openai,ollama,mcp]"
+
+      - name: Run pytest
+        # -m "not integration" so we skip the live-llm tests here — they
+        # have their own dedicated workflow with secrets.
+        run: pytest tests/ -q -m "not integration"
+
+      - name: Run mypy strict
+        run: python -m mypy mwa/
+
+      - name: Run ruff
+        run: ruff check mwa/ tests/ examples/ scripts/
+
+  # ------------------------------------------------------------------
+  # 2. Build sdist + wheel on a clean checkout and upload as an
+  #    artefact so the publish job gets exactly what the test job
+  #    verified.
+  # ------------------------------------------------------------------
+  build:
+    name: Build distributions
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install build + twine
+        run: python -m pip install --upgrade pip build twine
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: List artefacts
+        run: ls -lh dist/
+
+      - name: Smoke-install the wheel in a fresh venv
+        # Catches "wheel builds but doesn't install" issues before we
+        # upload anything.  The venv is throwaway — we just need
+        # ``import mwa`` + version echo to prove it.
+        run: |
+          python -m venv /tmp/smoke-install
+          /tmp/smoke-install/bin/pip install --upgrade pip
+          /tmp/smoke-install/bin/pip install dist/*.whl
+          /tmp/smoke-install/bin/python -c "
+          import mwa
+          from mwa.sdk import AgentRuntime, WorldAgent
+          from mwa.mcp_server import tool_list_nodes
+          print(f'smoke install OK: mwa {mwa.__version__}')
+          "
+
+      - name: Verify PyPI metadata with twine check
+        run: twine check --strict dist/*
+
+      - name: Upload dist artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  # ------------------------------------------------------------------
+  # 3. Publish to PyPI.
+  #
+  # Runs on:
+  #   - any ``v*.*.*`` tag push (automatic release)
+  #   - workflow_dispatch with ``dry_run: false`` (manual override)
+  #
+  # Skipped on workflow_dispatch with ``dry_run: true`` (the default),
+  # so pressing "Run workflow" in the UI validates the build without
+  # actually uploading.
+  # ------------------------------------------------------------------
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)
+    environment:
+      name: pypi
+      url: https://pypi.org/project/mwa/
+    steps:
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Download dist artefact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install twine
+        run: python -m pip install --upgrade pip twine
+
+      - name: Upload to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          if [ -z "$TWINE_PASSWORD" ]; then
+            echo "::error::PYPI_API_TOKEN secret is not set.  Add it in"
+            echo "::error::Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          twine upload --disable-progress-bar dist/*

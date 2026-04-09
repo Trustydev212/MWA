@@ -2,9 +2,22 @@
 
 > **"Agents don't talk to each other. They observe the same world."**
 
+[![PyPI](https://img.shields.io/pypi/v/mwa.svg)](https://pypi.org/project/mwa/)
+[![Python](https://img.shields.io/pypi/pyversions/mwa.svg)](https://pypi.org/project/mwa/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Status: Research Prototype](https://img.shields.io/badge/Status-Research%20Prototype-orange)]()
-[![Stack: Python + Neo4j + WebSocket](https://img.shields.io/badge/Stack-Python%20%2B%20Neo4j%20%2B%20WebSocket-blue)]()
+[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-green)]()
+
+```bash
+pip install mwa                   # core library
+pip install mwa[openai]           # + OpenAI / OpenAI-compatible gateway support
+pip install mwa[anthropic]        # + Claude
+pip install mwa[mcp]              # + MCP server (plug into Claude Code / Cursor)
+pip install mwa[all]              # everything except dev tools
+```
+
+Quick look: see [`docs/getting-started.md`](docs/getting-started.md)
+for a 10-minute walkthrough, or [`examples/openclaw_team/`](examples/openclaw_team/)
+for a runnable 4-agent demo.
 
 ---
 
